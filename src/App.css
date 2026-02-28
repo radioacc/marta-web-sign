@@ -1,3 +1,4 @@
+/* --- 1. RESET & BASICS --- */
 * {
     box-sizing: border-box;
     margin: 0;
@@ -26,6 +27,7 @@ body {
     height: 100vh;
 }
 
+/* --- 2. HEADER LOGIC --- */
 header {
     background-color: black;
     color: white;
@@ -80,6 +82,7 @@ header {
     align-items: center;
 }
 
+/* --- 3. BUTTONS & UI CONTROLS --- */
 button.nav-btn {
     background-color: #333;
     color: white;
@@ -123,6 +126,7 @@ button.nav-btn {
         opacity: 0.8;
     }
 
+/* --- 4. MAIN TRAIN LIST --- */
 main {
     flex-grow: 1;
     overflow-y: auto;
@@ -159,6 +163,7 @@ main {
     text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
 }
 
+/* MARTA Line Colors */
 .RED {
     background-color: #ED1C24;
 }
@@ -223,6 +228,13 @@ main {
     color: #888;
 }
 
+.status-sched .destination,
+.status-sched .minutes-main,
+.status-sched .line-bubble {
+    opacity: 0.6;
+}
+
+/* --- 5. MODALS & TOASTS --- */
 .modal-overlay {
     position: fixed;
     top: 0;
@@ -357,6 +369,7 @@ main {
     }
 }
 
+/* --- 6. MOBILE RESPONSIVE TWEAKS --- */
 @media (max-width: 600px) {
     header {
         height: 60px;
