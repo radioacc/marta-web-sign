@@ -17,7 +17,7 @@ The app focuses on speed and handling bad data gracefully.
 
 ## Tech Stack
 
-This is a fairly straightforward frontend project. It uses React and Vite, and all the styling is done with plain CSS to keep things light. It is currently configured to deploy directly to Cloudflare Pages.
+This is a fairly straightforward frontend project. It uses React and Vite, and all the styling is done with plain CSS to keep things light. It is currently configured to deploy directly to Cloudflare Pages and deployed to the Cloudflare CDN.
 
 ## Running it locally
 
