@@ -21,7 +21,9 @@ This is a fairly straightforward frontend project. It uses React and Vite, and a
 
 ## Running it locally
 
-To get this running on your own machine:
+Before you can run this app yourself, you need to acquire a free API key and comply with the [MARTA developer requirements](https://itsmarta.com/app-developer-resources.aspx). 
+
+Once you have your key:
 
 1. Clone the repository:
    ```bash
