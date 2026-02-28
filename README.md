@@ -2,7 +2,7 @@
 
 A live demo is usually running at [marta.adamcaskey.com](https://marta.adamcaskey.com).
 
-I origionally built this app as a Python app but reconfigured as a React app to track MARTA train arrivals in Atlanta because the official data feed can be pretty unreliable and lacked the same load time and UI that I felt the experience needed. The main goal was to make something that loads instantly and doesn't just show a blank screen when the API drops a connection and mirrored the UI experienced to the in-station signage. 
+I originally built this as a Python app but rewrote it in React to track MARTA train arrivals in Atlanta. The official data feed can be pretty unreliable, and the existing tools lacked the speed and UI I wanted. My intent was to build something lightweight and mobile-responsive that mirrors the actual in-station signage, complete with dark and light mode compatibility. The main goal was to make an app that loads instantly and doesn't just show a blank screen when the API drops a connection. It also tries to grab your location right on load to automatically display the nearest station, though you can easily override it manually as needed.
 
 ## How it works
 
