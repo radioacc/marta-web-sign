@@ -2,7 +2,7 @@
 
 A live demo is usually running at [marta.adamcaskey.com](https://marta.adamcaskey.com).
 
-I built this React app to track MARTA train arrivals in Atlanta because the official data feed can be pretty unreliable. The main goal was to make something that loads instantly and doesn't just show a blank screen when the API drops a connection. 
+I origionally built this app as a Python app but reconfigured as a React app to track MARTA train arrivals in Atlanta because the official data feed can be pretty unreliable and lacked the same load time and UI that I felt the experience needed. The main goal was to make something that loads instantly and doesn't just show a blank screen when the API drops a connection and mirrored the UI experienced to the in-station signage. 
 
 ## How it works
 
