@@ -5,11 +5,11 @@ const STATION_LIST = [
     "AIRPORT", "ARTS CENTER", "ASHBY", "AVONDALE", "BANKHEAD", "BROOKHAVEN",
     "BUCKHEAD", "CHAMBLEE", "CIVIC CENTER", "COLLEGE PARK", "DECATUR",
     "DORAVILLE", "DUNWOODY", "EAST LAKE", "EAST POINT", "EDGEWOOD CANDLER PARK",
-    "FIVE POINTS", "GARNETT", "GEORGIA STATE", "GOLD DOME", "HAMILTON E HOLMES",
+    "FIVE POINTS", "GARNETT", "GEORGIA STATE", "HAMILTON E HOLMES",
     "INDIAN CREEK", "INMAN PARK", "KENSINGTON", "KING MEMORIAL", "LAKEWOOD",
     "LENOX", "LINDBERGH", "MEDICAL CENTER", "MIDTOWN", "NORTH AVENUE",
     "NORTH SPRINGS", "OAKLAND CITY", "PEACHTREE CENTER", "SANDY SPRINGS",
-    "VINE CITY", "WEST END", "WEST LAKE"
+    "SEC DISTRICT", "VINE CITY", "WEST END", "WEST LAKE"
 ];
 
 const STATION_COORDS = {
@@ -46,6 +46,7 @@ const STATION_COORDS = {
     "NORTH AVENUE": { lat: 33.7717, lon: -84.3870 },
     "NORTH SPRINGS": { lat: 33.9446, lon: -84.3562 },
     "OAKLAND CITY": { lat: 33.7168, lon: -84.4251 },
+    "OMNI": { lat: 33.7564, lon: -84.3973 },
     "PEACHTREE CENTER": { lat: 33.7596, lon: -84.3875 },
     "SANDY SPRINGS": { lat: 33.9330, lon: -84.3520 },
     "VINE CITY": { lat: 33.7568, lon: -84.4039 },
@@ -215,7 +216,9 @@ export default function App() {
     const currentTrains = trainCache[currentStation] || [];
     const visibleTrains = currentTrains.filter(t => activeFilter === "ALL" || t.destination === activeFilter);
     const uniqueDestinations = Array.from(new Set(currentTrains.map(t => t.destination))).sort();
-    const displayStation = titleCase(currentStation.replace(/ STATION/i, ''));
+    const displayStation = currentStation === "OMNI"
+        ? "SEC District"
+        : titleCase(currentStation.replace(/ STATION/i, ''));
 
     return (
         <div className="app-container">
