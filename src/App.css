@@ -373,6 +373,7 @@ main {
 .split-main {
     flex-grow: 1;
     display: flex;
+    /* Portrait (default): stack top/bottom */
     flex-direction: column;
     overflow: hidden;
 }
@@ -383,6 +384,7 @@ main {
     flex-direction: column;
     overflow: hidden;
     min-height: 0;
+    min-width: 0;
 }
 
 .pane-label {
@@ -413,14 +415,29 @@ main {
     font-size: 1.2rem;
 }
 
+/* Portrait divider: horizontal bar */
 .split-divider {
-    height: 2px;
     background-color: #eee;
     flex-shrink: 0;
+    height: 2px;
+    width: auto;
 }
 
 .dark-mode .split-divider {
     background-color: #333;
+}
+
+/* Landscape / desktop: side-by-side (left/right) */
+@media (orientation: landscape), (min-width: 768px) {
+    .split-main {
+        flex-direction: row;
+    }
+
+    /* Divider becomes a vertical bar */
+    .split-divider {
+        height: auto;
+        width: 2px;
+    }
 }
 
 /* Split/single pane toggle button */
