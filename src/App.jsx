@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import './App.css';
 
 const STATION_LIST = [
@@ -11,6 +11,14 @@ const STATION_LIST = [
     "NORTH SPRINGS", "OAKLAND CITY", "PEACHTREE CENTER", "SANDY SPRINGS",
     "SEC DISTRICT", "VINE CITY", "WEST END", "WEST LAKE"
 ];
+
+// Stations served exclusively or primarily by the East-West (Blue/Green) lines
+const EW_STATIONS = new Set([
+    "ASHBY", "AVONDALE", "BANKHEAD", "DECATUR", "EAST LAKE",
+    "EDGEWOOD CANDLER PARK", "GEORGIA STATE", "HAMILTON E HOLMES",
+    "INDIAN CREEK", "INMAN PARK", "KENSINGTON", "KING MEMORIAL",
+    "VINE CITY", "WEST END", "WEST LAKE"
+]);
 
 const STATION_COORDS = {
     "AIRPORT": { lat: 33.6407, lon: -84.4440 },
@@ -85,11 +93,38 @@ export default function App() {
         return localStorage.getItem('marta_theme') !== 'light';
     });
 
+    const [isSplitPane, setIsSplitPane] = useState(() => {
+        const saved = localStorage.getItem('marta_split_pane');
+        return saved === null ? true : saved === 'true';
+    });
+
     useEffect(() => {
         if (isDarkMode) document.body.classList.add('dark-mode');
         else document.body.classList.remove('dark-mode');
         localStorage.setItem('marta_theme', isDarkMode ? 'dark' : 'light');
     }, [isDarkMode]);
+
+    const toggleSplitPane = () => {
+        setIsSplitPane(prev => {
+            const next = !prev;
+            localStorage.setItem('marta_split_pane', String(next));
+            return next;
+        });
+    };
+
+    // Determine if station is an E/W station (Blue/Green lines only)
+    const isEastWest = EW_STATIONS.has(currentStation);
+    const isFivePoints = currentStation === "FIVE POINTS";
+
+    // Split directions — the MARTA API returns single-letter direction values: N, S, E, W
+    const getDirectionGroup = (direction) => {
+        const d = (direction || '').toUpperCase().charAt(0);
+        if (isEastWest) return d === 'W' ? 'top' : 'bottom';
+        return d === 'N' ? 'top' : 'bottom';
+    };
+
+    const topLabel = isEastWest ? 'Westbound' : 'Northbound';
+    const bottomLabel = isEastWest ? 'Eastbound' : 'Southbound';
 
     // --- 2. IRONCLAD FETCH LOGIC (Now writes directly to the Omni-Cache) ---
     const fetchTrains = useCallback(async () => {
@@ -220,6 +255,40 @@ export default function App() {
         ? "SEC District"
         : titleCase(currentStation.replace(/ STATION/i, ''));
 
+    const renderTrainRow = (t, i) => {
+        let mainTime = t.waiting_time;
+        let subLabel = "MIN";
+        if (mainTime === "Arriving") { mainTime = "ARR"; subLabel = ""; }
+        else if (mainTime === "Boarding") { mainTime = "BRD"; subLabel = ""; }
+        else { mainTime = mainTime.replace(' min', ''); }
+        return (
+            <div key={i} className={`train-row status-real`}>
+                <div className={`line-bubble ${t.line}`}>{t.direction}</div>
+                <div className="train-info"><div className="destination">{t.destination}</div></div>
+                <div className="minutes-box">
+                    <div className="minutes-main">{mainTime}</div>
+                    <div className="minutes-sub">{subLabel}</div>
+                </div>
+            </div>
+        );
+    };
+
+    const showSplit = isSplitPane && !isFivePoints;
+    const topTrains = showSplit ? visibleTrains.filter(t => getDirectionGroup(t.direction) === 'top') : [];
+    const bottomTrains = showSplit ? visibleTrains.filter(t => getDirectionGroup(t.direction) === 'bottom') : [];
+
+    const emptyState = (msg) => (
+        <div className="pane-empty">{msg}</div>
+    );
+
+    const trainListContent = (trains) => {
+        if (isLoading && currentTrains.length === 0) return emptyState("Fetching schedule...");
+        if (error && currentTrains.length === 0) return emptyState("Connection Error");
+        if (currentTrains.length === 0 && !isLoading) return emptyState("No trains found.");
+        if (trains.length === 0) return emptyState("No trains");
+        return trains.map(renderTrainRow);
+    };
+
     return (
         <div className="app-container">
             <header>
@@ -235,35 +304,54 @@ export default function App() {
                 </div>
             </header>
 
-            {/* Dim the main container slightly if we are loading fresh data */}
-            <main style={{ transition: 'opacity 0.3s', opacity: isLoading && currentTrains.length > 0 ? 0.6 : 1 }}>
-                {isLoading && currentTrains.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>Fetching schedule...</div>
-                ) : error && currentTrains.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>Connection Error</div>
-                ) : currentTrains.length === 0 && !isLoading ? (
-                    <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>No trains found.</div>
-                ) : (
-                    visibleTrains.map((t, i) => {
-                        let mainTime = t.waiting_time;
-                        let subLabel = "MIN";
-                        if (mainTime === "Arriving") { mainTime = "ARR"; subLabel = ""; }
-                        else if (mainTime === "Boarding") { mainTime = "BRD"; subLabel = ""; }
-                        else { mainTime = mainTime.replace(' min', ''); }
+            {showSplit ? (
+                <main className="split-main">
+                    <div className="split-pane top-pane">
+                        <div className="pane-label">{topLabel}</div>
+                        <div className="pane-trains">{trainListContent(topTrains)}</div>
+                    </div>
+                    <div className="split-divider" />
+                    <div className="split-pane bottom-pane">
+                        <div className="pane-label">{bottomLabel}</div>
+                        <div className="pane-trains">{trainListContent(bottomTrains)}</div>
+                    </div>
+                </main>
+            ) : (
+                <main style={{ transition: 'opacity 0.3s', opacity: isLoading && currentTrains.length > 0 ? 0.6 : 1 }}>
+                    {isLoading && currentTrains.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>Fetching schedule...</div>
+                    ) : error && currentTrains.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>Connection Error</div>
+                    ) : currentTrains.length === 0 && !isLoading ? (
+                        <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>No trains found.</div>
+                    ) : (
+                        visibleTrains.map(renderTrainRow)
+                    )}
+                </main>
+            )}
 
-                        return (
-                            <div key={i} className={`train-row status-real`}>
-                                <div className={`line-bubble ${t.line}`}>{t.direction}</div>
-                                <div className="train-info"><div className="destination">{t.destination}</div></div>
-                                <div className="minutes-box">
-                                    <div className="minutes-main">{mainTime}</div>
-                                    <div className="minutes-sub">{subLabel}</div>
-                                </div>
-                            </div>
-                        );
-                    })
-                )}
-            </main>
+            {/* Split/Single pane toggle — bottom left */}
+            {!isFivePoints && (
+                <button
+                    id="split-toggle"
+                    onClick={toggleSplitPane}
+                    title={isSplitPane ? "Switch to single pane" : "Switch to split pane"}
+                    aria-label={isSplitPane ? "Switch to single pane" : "Switch to split pane"}
+                >
+                    {isSplitPane ? (
+                        /* Single pane icon: one rectangle */
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                        </svg>
+                    ) : (
+                        /* Split pane icon: box on box */
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <rect x="3" y="3" width="18" height="8" rx="2" ry="2" />
+                            <rect x="3" y="13" width="18" height="8" rx="2" ry="2" />
+                        </svg>
+                    )}
+                </button>
+            )}
 
             <svg id="theme-toggle" viewBox="0 0 24 24" fill="currentColor" onClick={() => setIsDarkMode(!isDarkMode)}>
                 {isDarkMode ? (
