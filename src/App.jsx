@@ -543,6 +543,7 @@ export default function App() {
                 isCurrent: idx === trainIdxInOrdered,
                 isPassed: idx < trainIdxInOrdered,
                 isNextStop: idx === trainIdxInOrdered + 1,
+                isUserStation: idx === userIdxInOrdered,
                 isDestination: stationName === dest || dest.includes(stationName) || stationName.includes(dest),
                 minutesFromNow,
             });
@@ -739,7 +740,7 @@ export default function App() {
                                         const isLast = idx === stops.length - 1;
                                         let timeLabel = "";
 
-                                        if (stop.isCurrent) {
+                                        if (stop.isUserStation) {
                                             const mins = stop.minutesFromNow;
                                             if (mins <= 0) timeLabel = headerTime;
                                             else timeLabel = `${mins} min`;
@@ -752,20 +753,20 @@ export default function App() {
                                         return (
                                             <div
                                                 key={stop.name}
-                                                ref={stop.isCurrent ? currentStopRef : null}
-                                                className={`detail-stop${stop.isCurrent ? ' stop-current' : ''}${stop.isPassed ? ' stop-passed' : ''}${stop.isDestination ? ' stop-destination' : ''}`}
+                                                ref={stop.isUserStation ? currentStopRef : null}
+                                                className={`detail-stop${stop.isUserStation ? ' stop-current' : ''}${stop.isPassed ? ' stop-passed' : ''}${stop.isDestination ? ' stop-destination' : ''}`}
                                             >
                                                 <div className="stop-rail">
                                                     <div className="stop-rail-line stop-rail-top" style={{ background: isFirst ? 'transparent' : lineColor, opacity: isFirst ? 0 : (stop.isPassed ? 0.3 : 1) }} />
                                                     <div
-                                                        className={`stop-dot${stop.isCurrent ? ' stop-dot-current' : ''}${stop.isNextStop ? ' stop-dot-next' : ''}`}
+                                                        className={`stop-dot${stop.isUserStation ? ' stop-dot-current' : ''}${stop.isCurrent && !stop.isUserStation ? ' stop-dot-next' : ''}`}
                                                         style={{
                                                             background: stop.isPassed ? 'transparent' : lineColor,
                                                             border: stop.isPassed
                                                                 ? `2px solid ${lineColor}`
                                                                 : 'none',
-                                                            outline: stop.isNextStop ? `2px solid ${lineColor}` : 'none',
-                                                            outlineOffset: stop.isNextStop ? '2px' : '0',
+                                                            outline: (stop.isCurrent && !stop.isUserStation) ? `2px solid ${lineColor}` : 'none',
+                                                            outlineOffset: (stop.isCurrent && !stop.isUserStation) ? '2px' : '0',
                                                             opacity: stop.isPassed ? 0.3 : 1
                                                         }}
                                                     />
