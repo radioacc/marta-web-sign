@@ -455,7 +455,9 @@ export default function App() {
     }, [locationOverridden]);
 
     // Build the ordered list of stations with estimated arrival times for the detail view.
-    const buildRouteStops = (train, fromStation) => {
+    // fromStation: the train's current physical station (used to compute ETAs).
+    // userDisplayStation: the user's selected station (used to mark isUserStation).
+    const buildRouteStops = (train, fromStation, userDisplayStation) => {
         const line = (train.line || "").toUpperCase();
         const route = LINE_ROUTES[line];
         const segMins = LINE_SEGMENT_MINS[line];
@@ -463,6 +465,7 @@ export default function App() {
 
         const dest = normalizeStationName(train.destination);
         const userStation = normalizeStationName(fromStation);
+        const userDisplay = normalizeStationName(userDisplayStation || fromStation);
         if (!userStation || !dest) return [];
 
         let userIdx = route.findIndex(s => s === userStation);
@@ -503,6 +506,7 @@ export default function App() {
         if (trainIdxInOrdered === -1) return [];
 
         const userIdxInOrdered = ordered.findIndex(s => s === userStation);
+        const userDisplayIdxInOrdered = ordered.findIndex(s => s === userDisplay);
 
         const stops = [];
         ordered.forEach((stationName, idx) => {
@@ -543,7 +547,7 @@ export default function App() {
                 isCurrent: idx === trainIdxInOrdered,
                 isPassed: idx < trainIdxInOrdered,
                 isNextStop: idx === trainIdxInOrdered + 1,
-                isUserStation: idx === userIdxInOrdered,
+                isUserStation: idx === userDisplayIdxInOrdered,
                 isDestination: stationName === dest || dest.includes(stationName) || stationName.includes(dest),
                 minutesFromNow,
             });
@@ -708,7 +712,7 @@ export default function App() {
             {/* ── Train Detail / Route Progress View ── */}
             {selectedTrain && (() => {
                 const trackedStation = normalizeStationName(selectedTrain.station || currentStation);
-                const stops = buildRouteStops(selectedTrain, trackedStation);
+                const stops = buildRouteStops(selectedTrain, trackedStation, currentStation);
                 const line = (selectedTrain.line || "GRAY").toUpperCase();
                 const lineColor = { RED: '#ED1C24', GOLD: '#FFA500', BLUE: '#009DDC', GREEN: '#69BE28' }[line] || '#999';
 
