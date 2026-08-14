@@ -119,6 +119,10 @@ const waitingTimeFromSeconds = (secs) => {
     return `${Math.ceil(secs / 60)} min`;
 };
 
+// How many seconds a "Departing" status is allowed to linger before the train
+// is considered gone.  15 s is enough for a train to clear the platform.
+const DEP_EXPIRE_SECS = -15;
+
 const normalizeRealtimeTrain = (train) => {
     if (!train || train.status === 'Scheduled') return train;
 
@@ -165,7 +169,9 @@ const tickRealtimeTrain = (train) => {
     if (secs === null) secs = 0;
     secs -= 1;
 
-    if (secs <= -30) {
+    // Departing trains expire faster — 15 s is plenty to clear the platform.
+    const expireAt = train.waiting_time === 'Departing' ? DEP_EXPIRE_SECS : -30;
+    if (secs <= expireAt) {
         return null;
     }
 
@@ -356,7 +362,15 @@ export default function App() {
         if (!detailVisible || !selectedTrainKey) return;
 
         const ticker = setInterval(() => {
-            setSelectedTrain(prev => prev ? tickRealtimeTrain(prev) : prev);
+            setSelectedTrain(prev => {
+                if (!prev) return prev;
+                const ticked = tickRealtimeTrain(prev);
+                // If tick would expire the train (e.g. it just left this station),
+                // keep the last known state so the detail panel stays visible.
+                // The next network sync will update the station/ETA when the train
+                // appears at the next station.
+                return ticked ?? prev;
+            });
         }, 1000);
 
         return () => clearInterval(ticker);
@@ -448,17 +462,35 @@ export default function App() {
         if (!route || !segMins) return [];
 
         const dest = normalizeStationName(train.destination);
-        const from = normalizeStationName(fromStation);
-        if (!from || !dest) return [];
+        const userStation = normalizeStationName(fromStation);
+        if (!userStation || !dest) return [];
 
-        let fromIdx = route.findIndex(s => s === from);
+        let userIdx = route.findIndex(s => s === userStation);
         let destIdx = route.findIndex(s => s === dest);
 
-        if (fromIdx === -1 || destIdx === -1) return [];
+        if (userIdx === -1 || destIdx === -1) return [];
 
-        const direction = destIdx > fromIdx ? 1 : -1;
-        const stops = [];
+        const direction = destIdx > userIdx ? 1 : -1;
 
+        const arrivalSecs = parseSecs(train.waiting_seconds);
+        const arrivalMins = arrivalSecs === null ? 0 : Math.max(0, Math.ceil(arrivalSecs / 60));
+
+        // Walk backwards from the user's station to find the actual train position.
+        // We keep subtracting segment travel times until we've accounted for arrivalMins.
+        let trainIdx = userIdx;
+        let remainingMins = arrivalMins;
+        while (remainingMins > 0 && trainIdx - direction >= 0 && trainIdx - direction < route.length) {
+            const prevIdx = trainIdx - direction;
+            const segIdx = direction === 1
+                ? Math.min(Math.max(prevIdx, 0), segMins.length - 1)
+                : Math.min(Math.max(route.length - 2 - prevIdx, 0), segMins.length - 1);
+            const segTime = segMins[segIdx] || 2;
+            if (segTime > remainingMins) break;
+            remainingMins -= segTime;
+            trainIdx = prevIdx;
+        }
+
+        // Build the ordered stop list from the line start terminus to the destination.
         const lineStart = direction === 1 ? 0 : route.length - 1;
         const lineEnd = destIdx;
 
@@ -467,33 +499,52 @@ export default function App() {
             ordered.push(route[i]);
         }
 
-        const arrivalSecs = parseSecs(train.waiting_seconds);
-        const arrivalMins = arrivalSecs === null ? 0 : Math.max(0, Math.ceil(arrivalSecs / 60));
-        const curIdxInOrdered = ordered.findIndex(s => s === from);
-        if (curIdxInOrdered === -1) return [];
+        const trainIdxInOrdered = ordered.findIndex(s => s === route[trainIdx]);
+        if (trainIdxInOrdered === -1) return [];
 
+        const userIdxInOrdered = ordered.findIndex(s => s === userStation);
+
+        const stops = [];
         ordered.forEach((stationName, idx) => {
             let minuteOffset = 0;
-            if (idx < curIdxInOrdered) {
-                for (let j = idx; j < curIdxInOrdered; j++) {
+            if (idx < trainIdxInOrdered) {
+                // Before the train's current position — these stations are passed.
+                for (let j = idx; j < trainIdxInOrdered; j++) {
                     const segIdx = direction === 1 ? j : route.length - 2 - j;
                     const safeSegIdx = Math.min(Math.max(segIdx, 0), segMins.length - 1);
                     minuteOffset -= (segMins[safeSegIdx] || 2);
                 }
-            } else if (idx > curIdxInOrdered) {
-                for (let j = curIdxInOrdered; j < idx; j++) {
+            } else if (idx > trainIdxInOrdered) {
+                for (let j = trainIdxInOrdered; j < idx; j++) {
                     const segIdx = direction === 1 ? j : route.length - 2 - j;
                     const safeSegIdx = Math.min(Math.max(segIdx, 0), segMins.length - 1);
                     minuteOffset += (segMins[safeSegIdx] || 2);
                 }
             }
 
+            // minuteOffset is relative to the train's current physical position.
+            // Convert to "minutes from now" using the arrival time at the user station.
+            const minsToUser = userIdxInOrdered >= trainIdxInOrdered
+                ? (() => {
+                    let m = 0;
+                    for (let j = trainIdxInOrdered; j < userIdxInOrdered; j++) {
+                        const segIdx = direction === 1 ? j : route.length - 2 - j;
+                        const safeSegIdx = Math.min(Math.max(segIdx, 0), segMins.length - 1);
+                        m += segMins[safeSegIdx] || 2;
+                    }
+                    return m;
+                })()
+                : 0;
+            const baseEta = arrivalMins - minsToUser; // ETA of train's current physical position (≈0 or negative)
+            const minutesFromNow = baseEta + minuteOffset;
+
             stops.push({
                 name: stationName,
-                isCurrent: idx === curIdxInOrdered,
-                isPassed: idx < curIdxInOrdered,
+                isCurrent: idx === trainIdxInOrdered,
+                isPassed: idx < trainIdxInOrdered,
+                isNextStop: idx === trainIdxInOrdered + 1,
                 isDestination: stationName === dest || dest.includes(stationName) || stationName.includes(dest),
-                minutesFromNow: arrivalMins + minuteOffset,
+                minutesFromNow,
             });
         });
 
@@ -689,7 +740,9 @@ export default function App() {
                                         let timeLabel = "";
 
                                         if (stop.isCurrent) {
-                                            timeLabel = headerTime;
+                                            const mins = stop.minutesFromNow;
+                                            if (mins <= 0) timeLabel = headerTime;
+                                            else timeLabel = `${mins} min`;
                                         } else if (!stop.isPassed) {
                                             const minutes = stop.minutesFromNow;
                                             if (minutes <= 0) timeLabel = "ARR";
@@ -704,7 +757,18 @@ export default function App() {
                                             >
                                                 <div className="stop-rail">
                                                     <div className="stop-rail-line stop-rail-top" style={{ background: isFirst ? 'transparent' : lineColor, opacity: isFirst ? 0 : (stop.isPassed ? 0.3 : 1) }} />
-                                                    <div className={`stop-dot${stop.isCurrent ? ' stop-dot-current' : ''}`} style={{ background: stop.isPassed ? 'transparent' : lineColor, border: stop.isPassed ? `2px solid ${lineColor}` : 'none', opacity: stop.isPassed ? 0.3 : 1 }} />
+                                                    <div
+                                                        className={`stop-dot${stop.isCurrent ? ' stop-dot-current' : ''}${stop.isNextStop ? ' stop-dot-next' : ''}`}
+                                                        style={{
+                                                            background: stop.isPassed ? 'transparent' : lineColor,
+                                                            border: stop.isPassed
+                                                                ? `2px solid ${lineColor}`
+                                                                : 'none',
+                                                            outline: stop.isNextStop ? `2px solid ${lineColor}` : 'none',
+                                                            outlineOffset: stop.isNextStop ? '2px' : '0',
+                                                            opacity: stop.isPassed ? 0.3 : 1
+                                                        }}
+                                                    />
                                                     <div className="stop-rail-line stop-rail-bottom" style={{ background: lineColor, opacity: (isLast || stop.isDestination) ? 0 : (stop.isPassed ? 0.3 : 1) }} />
                                                 </div>
                                                 <div className="stop-info">

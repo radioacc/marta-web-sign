@@ -682,6 +682,12 @@ main {
     box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.15);
 }
 
+/* Next stop: solid filled dot with a thin ring around it */
+.stop-dot-next {
+    width: 14px;
+    height: 14px;
+}
+
 .stop-info {
     flex-grow: 1;
     display: flex;
