@@ -199,7 +199,7 @@ main {
     overflow: hidden;
     text-overflow: ellipsis;
     letter-spacing: -1px;
-    line-height: 1;
+    line-height: 1.06;
 }
 
 .minutes-box {

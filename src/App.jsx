@@ -67,8 +67,32 @@ const STATION_COORDS = {
     "WEST LAKE": { lat: 33.7531, lon: -84.4461 }
 };
 
+const parseSecs = (value) => {
+    const secs = Number.parseInt(value, 10);
+    return Number.isFinite(secs) ? secs : null;
+};
+
+const waitingTimeFromSeconds = (secs) => {
+    if (!Number.isFinite(secs)) return null;
+    if (secs <= 30) return "Arriving";
+    return `${Math.ceil(secs / 60)} min`;
+};
+
+const normalizeRealtimeTrain = (t) => {
+    if (!t || t.status === "Scheduled" || t.waiting_time === "Departing") return t;
+    const secs = parseSecs(t.waiting_seconds);
+    if (secs === null) return t;
+    return {
+        ...t,
+        waiting_seconds: String(Math.max(secs, 0)),
+        waiting_time: waitingTimeFromSeconds(secs)
+    };
+};
+
 // Build a stable unique key per train so we can match across refreshes
-const trainKey = (t) => `${t.line}_${t.direction}_${t.destination}`;
+const trainKey = (t) => t.train_id
+    ? `${t.line}_${t.direction}_${t.train_id}`
+    : `${t.line}_${t.direction}_${t.destination}`;
 
 export default function App() {
     // --- Station: restore from localStorage, check 2-hour TTL ---
@@ -166,19 +190,24 @@ export default function App() {
             if (Array.isArray(data) && data.length > 0) {
                 setTrainCache(prev => {
                     const existing = prev[currentStation] || [];
-                    // Build a map of current locally-ticked trains by key
+                    // Build a map of current locally-ticked trains by key.
+                    // We keep arrays so duplicate destinations don't collapse into one entry.
                     const existingMap = {};
-                    existing.forEach(t => { existingMap[trainKey(t)] = t; });
+                    existing.forEach(t => {
+                        const key = trainKey(t);
+                        if (!existingMap[key]) existingMap[key] = [];
+                        existingMap[key].push(t);
+                    });
 
                     // Merge: for each train from the API, only lower (or replace) the time,
                     // never let a fresh API value push the time BACK UP past what we already show.
                     const merged = data.map(apiTrain => {
                         const key = trainKey(apiTrain);
-                        const local = existingMap[key];
-                        if (!local) return apiTrain; // brand-new train
+                        const local = existingMap[key]?.shift();
+                        if (!local) return normalizeRealtimeTrain(apiTrain); // brand-new train
 
-                        const apiSecs = parseInt(apiTrain.waiting_seconds, 10);
-                        const localSecs = parseInt(local.waiting_seconds, 10);
+                        const apiSecs = parseSecs(apiTrain.waiting_seconds);
+                        const localSecs = parseSecs(local.waiting_seconds);
 
                         // If local train is in DEP phase, keep DEP
                         if (local.waiting_time === 'Departing') return local;
@@ -188,19 +217,19 @@ export default function App() {
                         // If the API sends a higher value it means the train was re-scheduled
                         // or the API reset — accept it only when the difference is > 45s
                         // (a genuine re-sync) to avoid the 4→3→4 flicker.
-                        if (!isNaN(apiSecs) && !isNaN(localSecs)) {
+                        if (apiSecs !== null && localSecs !== null) {
                             if (apiSecs > localSecs + 45) {
                                 // Genuine re-sync from the API (e.g. train was delayed)
-                                return apiTrain;
+                                return normalizeRealtimeTrain(apiTrain);
                             }
                             if (apiSecs <= localSecs) {
                                 // API is lower or equal — fresher, use it
-                                return apiTrain;
+                                return normalizeRealtimeTrain(apiTrain);
                             }
                             // API is slightly higher than local tick — keep local (anti-flicker)
                             return local;
                         }
-                        return apiTrain;
+                        return normalizeRealtimeTrain(apiTrain);
                     });
 
                     merged.sort((a, b) => parseInt(a.waiting_seconds) - parseInt(b.waiting_seconds));
@@ -235,28 +264,23 @@ export default function App() {
                     const tickedTrains = stationTrains.map(t => {
                         if (t.status === 'Scheduled') return t;
 
-                        let secs = parseInt(t.waiting_seconds, 10);
+                        let secs = parseSecs(t.waiting_seconds);
 
                         // DEP phase: train has arrived; count down its departure window
                         if (t.waiting_time === 'Departing') {
-                            const depSecs = parseInt(t.dep_seconds, 10) - 1;
+                            const depSecs = (parseSecs(t.dep_seconds) ?? 0) - 1;
                             if (depSecs <= 0) return null; // remove from list
                             return { ...t, dep_seconds: depSecs.toString() };
                         }
 
-                        if (isNaN(secs) || secs <= 0) {
+                        if (secs === null || secs <= 0) {
                             // Transition to DEP phase
                             return { ...t, waiting_seconds: '0', waiting_time: 'Departing', dep_seconds: String(DEP_DISPLAY_SECONDS) };
                         }
 
                         secs -= 1;
 
-                        let newTimeStr;
-                        if (secs <= 30) {
-                            newTimeStr = "Arriving";
-                        } else {
-                            newTimeStr = Math.ceil(secs / 60) + " min";
-                        }
+                        const newTimeStr = waitingTimeFromSeconds(secs);
 
                         return { ...t, waiting_seconds: secs.toString(), waiting_time: newTimeStr };
                     }).filter(Boolean); // remove nulls (expired DEP trains)
@@ -495,4 +519,3 @@ export default function App() {
         </div>
     );
 }
-
