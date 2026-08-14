@@ -36,7 +36,7 @@ const LINE_ROUTES = {
 // Average travel time in minutes between each consecutive station pair per line.
 // Index i = minutes from station[i] to station[i+1].
 const LINE_SEGMENT_MINS = {
-    RED:  [2, 2, 2, 2, 3, 3, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3],
+    RED: [2, 2, 2, 2, 3, 3, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3],
     GOLD: [3, 3, 3, 2, 3, 3, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3],
     BLUE: [3, 2, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
     GREEN: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
@@ -95,6 +95,87 @@ const STATION_COORDS = {
     "WEST LAKE": { lat: 33.7531, lon: -84.4461 }
 };
 
+const EW_STATIONS = new Set([
+    "ASHBY", "AVONDALE", "BANKHEAD", "DECATUR", "EAST LAKE",
+    "EDGEWOOD CANDLER PARK", "GEORGIA STATE", "HAMILTON E HOLMES",
+    "INDIAN CREEK", "INMAN PARK", "KENSINGTON", "KING MEMORIAL",
+    "VINE CITY", "WEST END", "WEST LAKE"
+]);
+
+const parseSecs = (value) => {
+    const secs = Number.parseInt(value, 10);
+    return Number.isFinite(secs) ? secs : null;
+};
+
+const normalizeStationName = (station) => {
+    const normalized = String(station || "").toUpperCase().replace(/ STATION/g, "");
+    return normalized === "SEC DISTRICT" ? "OMNI" : normalized;
+};
+
+const waitingTimeFromSeconds = (secs) => {
+    if (!Number.isFinite(secs)) return null;
+    if (secs <= 0) return "Departing";
+    if (secs <= 30) return "Arriving";
+    return `${Math.ceil(secs / 60)} min`;
+};
+
+const normalizeRealtimeTrain = (train) => {
+    if (!train || train.status === 'Scheduled') return train;
+
+    const secs = parseSecs(train.waiting_seconds);
+    if (secs === null) return train;
+
+    if (train.waiting_time === 'Boarding' || train.waiting_time === 'Departing') {
+        return { ...train, waiting_seconds: String(Math.max(secs, 0)) };
+    }
+
+    const safeSecs = Math.max(secs, 0);
+    return {
+        ...train,
+        station: normalizeStationName(train.station),
+        waiting_seconds: String(safeSecs),
+        waiting_time: safeSecs <= 30 ? 'Arriving' : `${Math.ceil(safeSecs / 60)} min`
+    };
+};
+
+const sortTrainByTime = (a, b) => {
+    const aIsDeparting = a.waiting_time === 'Departing';
+    const bIsDeparting = b.waiting_time === 'Departing';
+
+    if (aIsDeparting && !bIsDeparting) return 1;
+    if (!aIsDeparting && bIsDeparting) return -1;
+
+    const aSecs = parseSecs(a.waiting_seconds);
+    const bSecs = parseSecs(b.waiting_seconds);
+
+    if (aSecs === null && bSecs === null) return 0;
+    if (aSecs === null) return 1;
+    if (bSecs === null) return -1;
+    return aSecs - bSecs;
+};
+
+const trainKey = (train) => train?.train_id
+    ? `${train.line}_${train.direction}_${train.train_id}`
+    : `${train.line}_${train.direction}_${train.destination}_${normalizeStationName(train.station)}`;
+
+const tickRealtimeTrain = (train) => {
+    if (!train || train.status === 'Scheduled') return train;
+
+    let secs = parseSecs(train.waiting_seconds);
+    if (secs === null) secs = 0;
+    secs -= 1;
+
+    if (secs <= -30) {
+        return null;
+    }
+
+    return {
+        ...train,
+        waiting_seconds: String(secs),
+        waiting_time: waitingTimeFromSeconds(secs)
+    };
+};
+
 export default function App() {
     const [currentStation, setCurrentStation] = useState(() => {
         return localStorage.getItem('marta_user_station') || "MIDTOWN";
@@ -118,10 +199,14 @@ export default function App() {
     const [showStationModal, setShowStationModal] = useState(false);
     const [showFilterModal, setShowFilterModal] = useState(false);
     const [selectedTrain, setSelectedTrain] = useState(null);
+    const [selectedTrainKey, setSelectedTrainKey] = useState(null);
     const [detailVisible, setDetailVisible] = useState(false);
     const [toastMsg, setToastMsg] = useState("");
     const [locationOverridden, setLocationOverridden] = useState(() => {
         return localStorage.getItem('marta_user_station') !== null;
+    });
+    const [isSplitPane, setIsSplitPane] = useState(() => {
+        return localStorage.getItem('marta_split_pane') === 'true';
     });
 
     const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -134,6 +219,37 @@ export default function App() {
         localStorage.setItem('marta_theme', isDarkMode ? 'dark' : 'light');
     }, [isDarkMode]);
 
+    const showToast = (msg) => {
+        setToastMsg(msg);
+        setTimeout(() => setToastMsg(""), 3000);
+    };
+
+    const titleCase = (str) => {
+        if (!str) return "";
+        return str.toLowerCase().replace(/(?:^|[\s-])\w/g, match => match.toUpperCase());
+    };
+
+    const toggleSplitPane = () => {
+        setIsSplitPane(prev => {
+            const next = !prev;
+            localStorage.setItem('marta_split_pane', String(next));
+            return next;
+        });
+    };
+
+    const isEastWest = EW_STATIONS.has(normalizeStationName(currentStation));
+    const isFivePoints = normalizeStationName(currentStation) === "FIVE POINTS";
+
+    const getDirectionGroup = (direction) => {
+        const d = (direction || '').toUpperCase().charAt(0);
+        if (isFivePoints) return (d === 'N' || d === 'S') ? 'top' : 'bottom';
+        if (isEastWest) return d === 'W' ? 'top' : 'bottom';
+        return d === 'N' ? 'top' : 'bottom';
+    };
+
+    const topLabel = isFivePoints ? 'North · South' : (isEastWest ? 'Westbound' : 'Northbound');
+    const bottomLabel = isFivePoints ? 'East · West' : (isEastWest ? 'Eastbound' : 'Southbound');
+
     // --- 2. IRONCLAD FETCH LOGIC (Now writes directly to the Omni-Cache) ---
     const fetchTrains = useCallback(async () => {
         setIsLoading(true);
@@ -143,9 +259,40 @@ export default function App() {
             const data = await response.json();
 
             if (Array.isArray(data) && data.length > 0) {
-                // Fresh data arrived — replace the cache for this station outright
-                setTrainCache(prev => ({ ...prev, [currentStation]: data }));
-                localStorage.setItem(`marta_backup_${currentStation}`, JSON.stringify(data));
+                setTrainCache(prev => {
+                    const existing = prev[currentStation] || [];
+                    const existingMap = {};
+
+                    existing.forEach(train => {
+                        const key = trainKey(train);
+                        if (!existingMap[key]) existingMap[key] = [];
+                        existingMap[key].push(train);
+                    });
+
+                    const merged = data.map(apiTrain => {
+                        const normalizedTrain = normalizeRealtimeTrain(apiTrain);
+                        const key = trainKey(normalizedTrain);
+                        const localTrain = existingMap[key]?.shift();
+
+                        if (!localTrain) return normalizedTrain;
+                        if (localTrain.waiting_time === 'Departing') return localTrain;
+
+                        const apiSecs = parseSecs(normalizedTrain.waiting_seconds);
+                        const localSecs = parseSecs(localTrain.waiting_seconds);
+
+                        if (apiSecs !== null && localSecs !== null) {
+                            if (apiSecs > localSecs + 45) return normalizedTrain;
+                            if (apiSecs <= localSecs) return normalizedTrain;
+                            return localTrain;
+                        }
+
+                        return normalizedTrain;
+                    });
+
+                    merged.sort(sortTrainByTime);
+                    localStorage.setItem(`marta_backup_${currentStation}`, JSON.stringify(merged));
+                    return { ...prev, [currentStation]: merged };
+                });
                 setError(false);
             } else {
                 // API returned empty — purge trains that are already overdue (waiting_seconds <= -30)
@@ -153,7 +300,7 @@ export default function App() {
                 setTrainCache(prev => {
                     const existing = prev[currentStation];
                     if (!existing) return prev;
-                    const pruned = existing.filter(t => parseInt(t.waiting_seconds, 10) > -30);
+                    const pruned = existing.filter(t => parseSecs(t.waiting_seconds) > -30);
                     if (pruned.length === existing.length) return prev;
                     return { ...prev, [currentStation]: pruned };
                 });
@@ -179,37 +326,15 @@ export default function App() {
                     if (!stationTrains || stationTrains.length === 0) continue;
 
                     const tickedTrains = stationTrains
-                        .map(t => {
-                            if (t.status === 'Scheduled') return t;
+                        .map(tickRealtimeTrain)
+                        .filter(Boolean);
 
-                            let secs = parseInt(t.waiting_seconds, 10);
-
-                            // If API sent a non-numeric status (e.g. "Boarding", "Departing"),
-                            // treat those as effectively 0 and let dead reckoning advance them.
-                            if (isNaN(secs)) secs = 0;
-
-                            secs -= 1;
-
-                            let newTimeStr;
-                            if (secs <= -30) {
-                                // Train has departed — mark for removal
-                                return null;
-                            } else if (secs <= 0) {
-                                // Dwell window: show Departing for the last 30s after arrival
-                                newTimeStr = "Departing";
-                            } else if (secs <= 30) {
-                                newTimeStr = "Arriving";
-                            } else {
-                                newTimeStr = Math.ceil(secs / 60) + " min";
-                            }
-
-                            return { ...t, waiting_seconds: secs.toString(), waiting_time: newTimeStr };
-                        })
-                        .filter(Boolean); // remove departed trains
-
-                    // Only write back if the result differs from the original
                     if (tickedTrains.length !== stationTrains.length ||
-                        tickedTrains.some((t, i) => t.waiting_seconds !== stationTrains[i].waiting_seconds)) {
+                        tickedTrains.some((t, i) =>
+                            t.waiting_seconds !== stationTrains[i]?.waiting_seconds ||
+                            t.waiting_time !== stationTrains[i]?.waiting_time
+                        )) {
+                        tickedTrains.sort(sortTrainByTime);
                         newCache[station] = tickedTrains;
                         stateChanged = true;
                     }
@@ -222,12 +347,66 @@ export default function App() {
         return () => clearInterval(ticker);
     }, []);
 
+    useEffect(() => {
+        if (!detailVisible || !selectedTrainKey) return;
+
+        const ticker = setInterval(() => {
+            setSelectedTrain(prev => prev ? tickRealtimeTrain(prev) : prev);
+        }, 1000);
+
+        return () => clearInterval(ticker);
+    }, [detailVisible, selectedTrainKey]);
+
     // Polling Interval
     useEffect(() => {
         fetchTrains();
         const interval = setInterval(fetchTrains, 15000);
         return () => clearInterval(interval);
     }, [fetchTrains]);
+
+    const syncSelectedTrainFromNetwork = useCallback(async () => {
+        if (!selectedTrainKey) return;
+
+        try {
+            const response = await fetch('/api/arrivals?station=ALL');
+            if (!response.ok) throw new Error("Network response was not ok");
+            const data = await response.json();
+            if (!Array.isArray(data) || data.length === 0) return;
+
+            const match = data
+                .map(normalizeRealtimeTrain)
+                .find(train => trainKey(train) === selectedTrainKey);
+
+            if (!match) return;
+
+            setSelectedTrain(prev => {
+                if (!prev) return prev;
+                if (prev.waiting_time === 'Departing') return prev;
+
+                const nextTrain = { ...match, station: normalizeStationName(match.station) };
+                const apiSecs = parseSecs(nextTrain.waiting_seconds);
+                const localSecs = parseSecs(prev.waiting_seconds);
+
+                if (apiSecs !== null && localSecs !== null) {
+                    if (apiSecs > localSecs + 45) return nextTrain;
+                    if (apiSecs <= localSecs) return nextTrain;
+                    return prev;
+                }
+
+                return nextTrain;
+            });
+        } catch (err) {
+            console.error("Detail tracking sync failed", err);
+        }
+    }, [selectedTrainKey]);
+
+    useEffect(() => {
+        if (!detailVisible || !selectedTrainKey) return;
+
+        syncSelectedTrainFromNetwork();
+        const interval = setInterval(syncSelectedTrainFromNetwork, 15000);
+        return () => clearInterval(interval);
+    }, [detailVisible, selectedTrainKey, syncSelectedTrainFromNetwork]);
 
     // Geolocation
     useEffect(() => {
@@ -256,106 +435,84 @@ export default function App() {
         });
     }, [locationOverridden]);
 
-    const showToast = (msg) => {
-        setToastMsg(msg);
-        setTimeout(() => setToastMsg(""), 3000);
-    };
-
-    const titleCase = (str) => {
-        if (!str) return "";
-        return str.toLowerCase().replace(/(?:^|[\s-])\w/g, match => match.toUpperCase());
-    };
-
     // Build the ordered list of stations with estimated arrival times for the detail view.
-    // train: the train object from the API cache (has line, direction, waiting_seconds, destination)
-    // fromStation: the current station the user is standing at (currentStation)
     const buildRouteStops = (train, fromStation) => {
         const line = (train.line || "").toUpperCase();
         const route = LINE_ROUTES[line];
         const segMins = LINE_SEGMENT_MINS[line];
         if (!route || !segMins) return [];
 
-        const dest = (train.destination || "").toUpperCase();
-        const from = fromStation.toUpperCase();
+        const dest = normalizeStationName(train.destination);
+        const from = normalizeStationName(fromStation);
+        if (!from || !dest) return [];
 
-        // Find the current station index in the route
         let fromIdx = route.findIndex(s => s === from || from.includes(s) || s.includes(from));
-        // Find the destination index
         let destIdx = route.findIndex(s => s === dest || dest.includes(s) || s.includes(dest));
 
-        // If we can't find either end, bail
         if (fromIdx === -1 || destIdx === -1) return [];
 
-        // Slice the route from origin (start of line) to destination, in travel direction
         const direction = destIdx > fromIdx ? 1 : -1;
         const stops = [];
 
-        // Walk from the start of the line in the direction of travel
-        // The train started from the far end from the destination
         const lineStart = direction === 1 ? 0 : route.length - 1;
         const lineEnd = destIdx;
 
-        // Build stops array in travel order (lineStart → lineEnd)
         const ordered = [];
         for (let i = lineStart; direction === 1 ? i <= lineEnd : i >= lineEnd; i += direction) {
             ordered.push(route[i]);
         }
 
-        // Calculate time offsets from current station
-        // Time from current station to arrival (from API)
-        const arrivalSecs = parseInt(train.waiting_seconds, 10);
-        const arrivalMins = isNaN(arrivalSecs) ? 0 : Math.max(0, Math.ceil(arrivalSecs / 60));
-
-        // Find current station index inside the ordered slice
+        const arrivalSecs = parseSecs(train.waiting_seconds);
+        const arrivalMins = arrivalSecs === null ? 0 : Math.max(0, Math.ceil(arrivalSecs / 60));
         const curIdxInOrdered = ordered.findIndex(s => s === from || from.includes(s) || s.includes(from));
+        if (curIdxInOrdered === -1) return [];
 
         ordered.forEach((stationName, idx) => {
-            // Calculate minute offset from current station
             let minuteOffset = 0;
             if (idx < curIdxInOrdered) {
-                // Stations already passed — negative offset
                 for (let j = idx; j < curIdxInOrdered; j++) {
                     const segIdx = direction === 1 ? j : route.length - 2 - j;
-                    const safeSegIdx = Math.min(segIdx, segMins.length - 1);
+                    const safeSegIdx = Math.min(Math.max(segIdx, 0), segMins.length - 1);
                     minuteOffset -= (segMins[safeSegIdx] || 2);
                 }
             } else if (idx > curIdxInOrdered) {
-                // Future stations — positive offset
                 for (let j = curIdxInOrdered; j < idx; j++) {
                     const segIdx = direction === 1 ? j : route.length - 2 - j;
-                    const safeSegIdx = Math.min(segIdx, segMins.length - 1);
+                    const safeSegIdx = Math.min(Math.max(segIdx, 0), segMins.length - 1);
                     minuteOffset += (segMins[safeSegIdx] || 2);
                 }
             }
 
-            const absMins = arrivalMins + minuteOffset;
             stops.push({
                 name: stationName,
                 isCurrent: idx === curIdxInOrdered,
                 isPassed: idx < curIdxInOrdered,
                 isDestination: stationName === dest || dest.includes(stationName) || stationName.includes(dest),
-                minutesFromNow: absMins,
+                minutesFromNow: arrivalMins + minuteOffset,
             });
         });
 
         return stops;
     };
 
-    // Scroll current station into view when detail panel opens
+    // Scroll current station into view when detail panel opens or train advances
     const currentStopRef = useRef(null);
+    const detailScrollKey = selectedTrain ? `${selectedTrainKey}:${normalizeStationName(selectedTrain.station || currentStation)}` : null;
     useEffect(() => {
-        if (detailVisible && currentStopRef.current) {
-            // Short delay so the slide-in animation has started
-            setTimeout(() => {
-                currentStopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }, 200);
-        }
-    }, [detailVisible]);
+        if (!detailVisible || !currentStopRef.current) return;
+
+        const timer = setTimeout(() => {
+            currentStopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }, 200);
+
+        return () => clearTimeout(timer);
+    }, [detailVisible, detailScrollKey]);
 
     // Open train detail with animation
     const openTrainDetail = (train) => {
-        setSelectedTrain(train);
-        // Small delay so the element mounts before transition starts
+        const normalizedTrain = normalizeRealtimeTrain(train);
+        setSelectedTrain(normalizedTrain);
+        setSelectedTrainKey(trainKey(normalizedTrain));
         requestAnimationFrame(() => {
             requestAnimationFrame(() => setDetailVisible(true));
         });
@@ -364,7 +521,10 @@ export default function App() {
     // Close train detail
     const closeTrainDetail = () => {
         setDetailVisible(false);
-        setTimeout(() => setSelectedTrain(null), 350);
+        setTimeout(() => {
+            setSelectedTrain(null);
+            setSelectedTrainKey(null);
+        }, 350);
     };
 
     // Escape key closes detail view
@@ -381,19 +541,51 @@ export default function App() {
         setLocationOverridden(true);
         localStorage.setItem('marta_user_station', station);
         setShowStationModal(false);
-
-        // We NO LONGER clear the array here! 
-        // The renderer now dynamically pulls from the trainCache.
         setIsLoading(true);
     };
 
-    // Dynamically grab the correct data block for whichever station is selected
     const currentTrains = trainCache[currentStation] || [];
     const visibleTrains = currentTrains.filter(t => activeFilter === "ALL" || t.destination === activeFilter);
     const uniqueDestinations = Array.from(new Set(currentTrains.map(t => t.destination))).sort();
-    const displayStation = currentStation === "OMNI"
+    const displayStation = normalizeStationName(currentStation) === "OMNI"
         ? "SEC District"
         : titleCase(currentStation.replace(/ STATION/i, ''));
+
+    const renderTrainRow = (train) => {
+        let mainTime = train.waiting_time;
+        let subLabel = "MIN";
+        if (mainTime === "Arriving") { mainTime = "ARR"; subLabel = ""; }
+        else if (mainTime === "Boarding") { mainTime = "BRD"; subLabel = ""; }
+        else if (mainTime === "Departing") { mainTime = "DEP"; subLabel = ""; }
+        else { mainTime = mainTime.replace(' min', ''); }
+
+        return (
+            <div key={trainKey(train)} className="train-row status-real" onClick={() => openTrainDetail(train)}>
+                <div className={`line-bubble ${train.line}`}>{train.direction}</div>
+                <div className="train-info"><div className="destination">{train.destination}</div></div>
+                <div className="minutes-box">
+                    <div className="minutes-main">{mainTime}</div>
+                    <div className="minutes-sub">{subLabel}</div>
+                </div>
+            </div>
+        );
+    };
+
+    const showSplit = isSplitPane || isFivePoints;
+    const topTrains = showSplit ? visibleTrains.filter(t => getDirectionGroup(t.direction) === 'top') : [];
+    const bottomTrains = showSplit ? visibleTrains.filter(t => getDirectionGroup(t.direction) === 'bottom') : [];
+
+    const emptyState = (msg) => (
+        <div className="pane-empty">{msg}</div>
+    );
+
+    const trainListContent = (trains) => {
+        if (isLoading && currentTrains.length === 0) return emptyState("Fetching schedule...");
+        if (error && currentTrains.length === 0) return emptyState("Connection Error");
+        if (currentTrains.length === 0 && !isLoading) return emptyState("No trains found.");
+        if (trains.length === 0) return emptyState("No trains");
+        return trains.map(renderTrainRow);
+    };
 
     return (
         <div className="app-container">
@@ -410,40 +602,56 @@ export default function App() {
                 </div>
             </header>
 
-            {/* Dim the main container slightly if we are loading fresh data */}
-            <main style={{ transition: 'opacity 0.3s', opacity: isLoading && currentTrains.length > 0 ? 0.6 : 1 }}>
-                {isLoading && currentTrains.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>Fetching schedule...</div>
-                ) : error && currentTrains.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>Connection Error</div>
-                ) : currentTrains.length === 0 && !isLoading ? (
-                    <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>No trains found.</div>
-                ) : (
-                    visibleTrains.map((t, i) => {
-                        let mainTime = t.waiting_time;
-                        let subLabel = "MIN";
-                        if (mainTime === "Arriving") { mainTime = "ARR"; subLabel = ""; }
-                        else if (mainTime === "Boarding") { mainTime = "BRD"; subLabel = ""; }
-                        else if (mainTime === "Departing") { mainTime = "DEP"; subLabel = ""; }
-                        else { mainTime = mainTime.replace(' min', ''); }
+            {showSplit ? (
+                <main className="split-main">
+                    <div className="split-pane top-pane">
+                        <div className="pane-label">{topLabel}</div>
+                        <div className="pane-trains">{trainListContent(topTrains)}</div>
+                    </div>
+                    <div className="split-divider" />
+                    <div className="split-pane bottom-pane">
+                        <div className="pane-label">{bottomLabel}</div>
+                        <div className="pane-trains">{trainListContent(bottomTrains)}</div>
+                    </div>
+                </main>
+            ) : (
+                <main style={{ transition: 'opacity 0.3s', opacity: isLoading && currentTrains.length > 0 ? 0.6 : 1 }}>
+                    {isLoading && currentTrains.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>Fetching schedule...</div>
+                    ) : error && currentTrains.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>Connection Error</div>
+                    ) : currentTrains.length === 0 && !isLoading ? (
+                        <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>No trains found.</div>
+                    ) : (
+                        visibleTrains.map(renderTrainRow)
+                    )}
+                </main>
+            )}
 
-                        return (
-                            <div key={i} className="train-row status-real" onClick={() => openTrainDetail(t)}>
-                                <div className={`line-bubble ${t.line}`}>{t.direction}</div>
-                                <div className="train-info"><div className="destination">{t.destination}</div></div>
-                                <div className="minutes-box">
-                                    <div className="minutes-main">{mainTime}</div>
-                                    <div className="minutes-sub">{subLabel}</div>
-                                </div>
-                            </div>
-                        );
-                    })
-                )}
-            </main>
+            {!isFivePoints && !selectedTrain && (
+                <button
+                    id="split-toggle"
+                    onClick={toggleSplitPane}
+                    title={isSplitPane ? "Switch to single pane" : "Switch to split pane"}
+                    aria-label={isSplitPane ? "Switch to single pane" : "Switch to split pane"}
+                >
+                    {isSplitPane ? (
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                        </svg>
+                    ) : (
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <rect x="3" y="3" width="18" height="8" rx="2" ry="2" />
+                            <rect x="3" y="13" width="18" height="8" rx="2" ry="2" />
+                        </svg>
+                    )}
+                </button>
+            )}
 
             {/* ── Train Detail / Route Progress View ── */}
             {selectedTrain && (() => {
-                const stops = buildRouteStops(selectedTrain, currentStation);
+                const trackedStation = normalizeStationName(selectedTrain.station || currentStation);
+                const stops = buildRouteStops(selectedTrain, trackedStation);
                 const line = (selectedTrain.line || "GRAY").toUpperCase();
                 const lineColor = { RED: '#ED1C24', GOLD: '#FFA500', BLUE: '#009DDC', GREEN: '#69BE28' }[line] || '#999';
 
@@ -474,22 +682,26 @@ export default function App() {
                                         const isFirst = idx === 0;
                                         const isLast = idx === stops.length - 1;
                                         let timeLabel = "";
+
                                         if (stop.isCurrent) {
                                             timeLabel = headerTime;
                                         } else if (!stop.isPassed) {
-                                            const m = stop.minutesFromNow;
-                                            if (m <= 0) timeLabel = "ARR";
-                                            else timeLabel = m + " min";
+                                            const minutes = stop.minutesFromNow;
+                                            if (minutes <= 0) timeLabel = "ARR";
+                                            else timeLabel = `${minutes} min`;
                                         }
+
                                         return (
-                                            <div key={stop.name} ref={stop.isCurrent ? currentStopRef : null} className={`detail-stop${stop.isCurrent ? ' stop-current' : ''}${stop.isPassed ? ' stop-passed' : ''}${stop.isDestination ? ' stop-destination' : ''}`}>
-                                                {/* Left rail */}
+                                            <div
+                                                key={stop.name}
+                                                ref={stop.isCurrent ? currentStopRef : null}
+                                                className={`detail-stop${stop.isCurrent ? ' stop-current' : ''}${stop.isPassed ? ' stop-passed' : ''}${stop.isDestination ? ' stop-destination' : ''}`}
+                                            >
                                                 <div className="stop-rail">
                                                     <div className="stop-rail-line stop-rail-top" style={{ background: isFirst ? 'transparent' : lineColor, opacity: isFirst ? 0 : (stop.isPassed ? 0.3 : 1) }} />
                                                     <div className={`stop-dot${stop.isCurrent ? ' stop-dot-current' : ''}`} style={{ background: stop.isPassed ? 'transparent' : lineColor, border: stop.isPassed ? `2px solid ${lineColor}` : 'none', opacity: stop.isPassed ? 0.3 : 1 }} />
                                                     <div className="stop-rail-line stop-rail-bottom" style={{ background: lineColor, opacity: (isLast || stop.isDestination) ? 0 : (stop.isPassed ? 0.3 : 1) }} />
                                                 </div>
-                                                {/* Station name + time */}
                                                 <div className="stop-info">
                                                     <div className="stop-name">{titleCase(stop.name)}</div>
                                                     {timeLabel ? <div className="stop-time">{timeLabel}</div> : null}
@@ -508,7 +720,7 @@ export default function App() {
                 {isDarkMode ? (
                     <path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9c0-.46-.04-.92-.1-1.36-.98 1.37-2.58 2.26-4.4 2.26-2.98 0-5.4-2.42-5.4-5.4 0-1.81.89-3.42 2.26-4.4-.44-.06-.9-.1-1.36-.1z" />
                 ) : (
-                    <path d="M12 9c1.65 0 3 1.35 3 3s-1.35 3-3 3-3-1.35-3-3 1.35-3 3-3m0-2c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-1 .45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41.39.39 1.03.39 1.41 0l1.06-1.06zM7.05 18.36c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41.39.39 1.03.39 1.41 0l1.06-1.06z" />
+                    <path d="M12 9c1.65 0 3 1.35 3 3s-1.35 3-3 3-3-1.35-3-3 1.35-3 3-3m0-2c-2.76 0-5 2.24-5 5s2.24 5 5 5 5-2.24 5-5-2.24-5-5-5zM2 13h2c.55 0 1-.45 1-1s-.45-1-1-1H2c-.55 0-1 .45-1 1s.45 1 1 1zm18 0h2c.55 0 1-.45 1-1s-.45-1-1-1h-2c-.55 0-.45-1 1s.45 1 1 1zM11 2v2c0 .55.45 1 1 1s1-.45 1-1V2c0-.55-.45-1-1-1s-1 .45-1 1zm0 18v2c0 .55.45 1 1 1s1-.45 1-1v-2c0-.55-.45-1-1-1s-1 .45-1 1zM5.99 4.58c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41L5.99 4.58zm12.37 12.37c-.39-.39-1.03-.39-1.41 0-.39.39-.39 1.03 0 1.41l1.06 1.06c.39.39 1.03.39 1.41 0 .39-.39.39-1.03 0-1.41l-1.06-1.06zm1.06-10.96c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41.39.39 1.03.39 1.41 0l1.06-1.06zM7.05 18.36c.39-.39.39-1.03 0-1.41-.39-.39-1.03-.39-1.41 0l-1.06 1.06c-.39.39-.39 1.03 0 1.41.39.39 1.03.39 1.41 0l1.06-1.06z" />
                 )}
             </svg>
 
