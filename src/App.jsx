@@ -100,12 +100,21 @@ export default function App() {
             const data = await response.json();
 
             if (Array.isArray(data) && data.length > 0) {
-                // Only update the specific station we are looking at
+                // Fresh data arrived — replace the cache for this station outright
                 setTrainCache(prev => ({ ...prev, [currentStation]: data }));
                 localStorage.setItem(`marta_backup_${currentStation}`, JSON.stringify(data));
                 setError(false);
             } else {
-                console.warn("MARTA sent empty data. Ignoring glitch to prevent blank screen.");
+                // API returned empty — purge trains that are already overdue (waiting_seconds <= -30)
+                // so stale "Arriving" entries don't linger indefinitely.
+                setTrainCache(prev => {
+                    const existing = prev[currentStation];
+                    if (!existing) return prev;
+                    const pruned = existing.filter(t => parseInt(t.waiting_seconds, 10) > -30);
+                    if (pruned.length === existing.length) return prev;
+                    return { ...prev, [currentStation]: pruned };
+                });
+                console.warn("MARTA sent empty data. Pruned overdue trains from cache.");
             }
         } catch (err) {
             console.error("Fetch error or disconnect", err);
@@ -126,26 +135,41 @@ export default function App() {
                     const stationTrains = newCache[station];
                     if (!stationTrains || stationTrains.length === 0) continue;
 
-                    const tickedTrains = stationTrains.map(t => {
-                        if (t.status === 'Scheduled') return t;
+                    const tickedTrains = stationTrains
+                        .map(t => {
+                            if (t.status === 'Scheduled') return t;
 
-                        let secs = parseInt(t.waiting_seconds, 10);
-                        if (isNaN(secs) || secs <= 0) return t;
+                            let secs = parseInt(t.waiting_seconds, 10);
 
-                        secs -= 1;
+                            // If API sent a non-numeric status (e.g. "Boarding", "Departing"),
+                            // treat those as effectively 0 and let dead reckoning advance them.
+                            if (isNaN(secs)) secs = 0;
 
-                        let newTimeStr = t.waiting_time;
-                        if (secs <= 30) {
-                            newTimeStr = "Arriving";
-                        } else {
-                            newTimeStr = Math.ceil(secs / 60) + " min";
-                        }
+                            secs -= 1;
 
-                        return { ...t, waiting_seconds: secs.toString(), waiting_time: newTimeStr };
-                    });
+                            let newTimeStr;
+                            if (secs <= -30) {
+                                // Train has departed — mark for removal
+                                return null;
+                            } else if (secs <= 0) {
+                                // Dwell window: show Departing for the last 30s after arrival
+                                newTimeStr = "Departing";
+                            } else if (secs <= 30) {
+                                newTimeStr = "Arriving";
+                            } else {
+                                newTimeStr = Math.ceil(secs / 60) + " min";
+                            }
 
-                    newCache[station] = tickedTrains;
-                    stateChanged = true;
+                            return { ...t, waiting_seconds: secs.toString(), waiting_time: newTimeStr };
+                        })
+                        .filter(Boolean); // remove departed trains
+
+                    // Only write back if the result differs from the original
+                    if (tickedTrains.length !== stationTrains.length ||
+                        tickedTrains.some((t, i) => t.waiting_seconds !== stationTrains[i].waiting_seconds)) {
+                        newCache[station] = tickedTrains;
+                        stateChanged = true;
+                    }
                 }
 
                 return stateChanged ? newCache : prevCache;
@@ -249,6 +273,7 @@ export default function App() {
                         let subLabel = "MIN";
                         if (mainTime === "Arriving") { mainTime = "ARR"; subLabel = ""; }
                         else if (mainTime === "Boarding") { mainTime = "BRD"; subLabel = ""; }
+                        else if (mainTime === "Departing") { mainTime = "DEP"; subLabel = ""; }
                         else { mainTime = mainTime.replace(' min', ''); }
 
                         return (
