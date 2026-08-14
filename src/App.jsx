@@ -1,5 +1,46 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+﻿import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
+
+// ─── MARTA Line route orders (terminus-to-terminus, direction agnostic) ──────
+// Used to build the station progress view when a user taps a train row.
+const LINE_ROUTES = {
+    // Red Line: North Springs ↔ Airport (via I-285/Buckhead corridor)
+    RED: [
+        "NORTH SPRINGS", "SANDY SPRINGS", "DUNWOODY", "MEDICAL CENTER",
+        "BUCKHEAD", "LINDBERGH", "ARTS CENTER", "MIDTOWN", "NORTH AVENUE",
+        "CIVIC CENTER", "PEACHTREE CENTER", "FIVE POINTS", "GARNETT",
+        "WEST END", "OAKLAND CITY", "LAKEWOOD", "EAST POINT", "COLLEGE PARK", "AIRPORT"
+    ],
+    // Gold Line: Doraville ↔ Airport (via Lenox/Buckhead corridor)
+    GOLD: [
+        "DORAVILLE", "CHAMBLEE", "BROOKHAVEN", "LENOX", "BUCKHEAD",
+        "LINDBERGH", "ARTS CENTER", "MIDTOWN", "NORTH AVENUE", "CIVIC CENTER",
+        "PEACHTREE CENTER", "FIVE POINTS", "GARNETT", "WEST END", "OAKLAND CITY",
+        "LAKEWOOD", "EAST POINT", "COLLEGE PARK", "AIRPORT"
+    ],
+    // Blue Line: Hamilton E Holmes ↔ Indian Creek
+    BLUE: [
+        "HAMILTON E HOLMES", "WEST LAKE", "BANKHEAD", "VINE CITY",
+        "OMNI", "FIVE POINTS", "GEORGIA STATE", "KING MEMORIAL", "INMAN PARK",
+        "EDGEWOOD CANDLER PARK", "EAST LAKE", "DECATUR", "AVONDALE",
+        "KENSINGTON", "INDIAN CREEK"
+    ],
+    // Green Line: Bankhead ↔ Indian Creek
+    GREEN: [
+        "BANKHEAD", "VINE CITY", "OMNI", "FIVE POINTS", "GEORGIA STATE",
+        "KING MEMORIAL", "INMAN PARK", "EDGEWOOD CANDLER PARK", "EAST LAKE",
+        "DECATUR", "AVONDALE", "KENSINGTON", "INDIAN CREEK"
+    ],
+};
+
+// Average travel time in minutes between each consecutive station pair per line.
+// Index i = minutes from station[i] to station[i+1].
+const LINE_SEGMENT_MINS = {
+    RED:  [2, 2, 2, 2, 3, 3, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3],
+    GOLD: [3, 3, 3, 2, 3, 3, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3],
+    BLUE: [3, 2, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
+    GREEN: [2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
+};
 
 const STATION_LIST = [
     "AIRPORT", "ARTS CENTER", "ASHBY", "AVONDALE", "BANKHEAD", "BROOKHAVEN",
@@ -65,7 +106,7 @@ export default function App() {
         STATION_LIST.forEach(s => {
             const saved = localStorage.getItem(`marta_backup_${s}`);
             if (saved) {
-                try { initialCache[s] = JSON.parse(saved); } catch (e) { }
+                try { initialCache[s] = JSON.parse(saved); } catch { /* ignore invalid cache */ }
             }
         });
         return initialCache;
@@ -76,6 +117,8 @@ export default function App() {
     const [error, setError] = useState(false);
     const [showStationModal, setShowStationModal] = useState(false);
     const [showFilterModal, setShowFilterModal] = useState(false);
+    const [selectedTrain, setSelectedTrain] = useState(null);
+    const [detailVisible, setDetailVisible] = useState(false);
     const [toastMsg, setToastMsg] = useState("");
     const [locationOverridden, setLocationOverridden] = useState(() => {
         return localStorage.getItem('marta_user_station') !== null;
@@ -223,6 +266,114 @@ export default function App() {
         return str.toLowerCase().replace(/(?:^|[\s-])\w/g, match => match.toUpperCase());
     };
 
+    // Build the ordered list of stations with estimated arrival times for the detail view.
+    // train: the train object from the API cache (has line, direction, waiting_seconds, destination)
+    // fromStation: the current station the user is standing at (currentStation)
+    const buildRouteStops = (train, fromStation) => {
+        const line = (train.line || "").toUpperCase();
+        const route = LINE_ROUTES[line];
+        const segMins = LINE_SEGMENT_MINS[line];
+        if (!route || !segMins) return [];
+
+        const dest = (train.destination || "").toUpperCase();
+        const from = fromStation.toUpperCase();
+
+        // Find the current station index in the route
+        let fromIdx = route.findIndex(s => s === from || from.includes(s) || s.includes(from));
+        // Find the destination index
+        let destIdx = route.findIndex(s => s === dest || dest.includes(s) || s.includes(dest));
+
+        // If we can't find either end, bail
+        if (fromIdx === -1 || destIdx === -1) return [];
+
+        // Slice the route from origin (start of line) to destination, in travel direction
+        const direction = destIdx > fromIdx ? 1 : -1;
+        const stops = [];
+
+        // Walk from the start of the line in the direction of travel
+        // The train started from the far end from the destination
+        const lineStart = direction === 1 ? 0 : route.length - 1;
+        const lineEnd = destIdx;
+
+        // Build stops array in travel order (lineStart → lineEnd)
+        const ordered = [];
+        for (let i = lineStart; direction === 1 ? i <= lineEnd : i >= lineEnd; i += direction) {
+            ordered.push(route[i]);
+        }
+
+        // Calculate time offsets from current station
+        // Time from current station to arrival (from API)
+        const arrivalSecs = parseInt(train.waiting_seconds, 10);
+        const arrivalMins = isNaN(arrivalSecs) ? 0 : Math.max(0, Math.ceil(arrivalSecs / 60));
+
+        // Find current station index inside the ordered slice
+        const curIdxInOrdered = ordered.findIndex(s => s === from || from.includes(s) || s.includes(from));
+
+        ordered.forEach((stationName, idx) => {
+            // Calculate minute offset from current station
+            let minuteOffset = 0;
+            if (idx < curIdxInOrdered) {
+                // Stations already passed — negative offset
+                for (let j = idx; j < curIdxInOrdered; j++) {
+                    const segIdx = direction === 1 ? j : route.length - 2 - j;
+                    const safeSegIdx = Math.min(segIdx, segMins.length - 1);
+                    minuteOffset -= (segMins[safeSegIdx] || 2);
+                }
+            } else if (idx > curIdxInOrdered) {
+                // Future stations — positive offset
+                for (let j = curIdxInOrdered; j < idx; j++) {
+                    const segIdx = direction === 1 ? j : route.length - 2 - j;
+                    const safeSegIdx = Math.min(segIdx, segMins.length - 1);
+                    minuteOffset += (segMins[safeSegIdx] || 2);
+                }
+            }
+
+            const absMins = arrivalMins + minuteOffset;
+            stops.push({
+                name: stationName,
+                isCurrent: idx === curIdxInOrdered,
+                isPassed: idx < curIdxInOrdered,
+                isDestination: stationName === dest || dest.includes(stationName) || stationName.includes(dest),
+                minutesFromNow: absMins,
+            });
+        });
+
+        return stops;
+    };
+
+    // Scroll current station into view when detail panel opens
+    const currentStopRef = useRef(null);
+    useEffect(() => {
+        if (detailVisible && currentStopRef.current) {
+            // Short delay so the slide-in animation has started
+            setTimeout(() => {
+                currentStopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 200);
+        }
+    }, [detailVisible]);
+
+    // Open train detail with animation
+    const openTrainDetail = (train) => {
+        setSelectedTrain(train);
+        // Small delay so the element mounts before transition starts
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => setDetailVisible(true));
+        });
+    };
+
+    // Close train detail
+    const closeTrainDetail = () => {
+        setDetailVisible(false);
+        setTimeout(() => setSelectedTrain(null), 350);
+    };
+
+    // Escape key closes detail view
+    useEffect(() => {
+        const onKey = (e) => { if (e.key === 'Escape') closeTrainDetail(); };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, []);
+
     // --- 4. THE CLEAN SWAP ---
     const handleStationChange = (station) => {
         setCurrentStation(station);
@@ -277,7 +428,7 @@ export default function App() {
                         else { mainTime = mainTime.replace(' min', ''); }
 
                         return (
-                            <div key={i} className={`train-row status-real`}>
+                            <div key={i} className="train-row status-real" onClick={() => openTrainDetail(t)}>
                                 <div className={`line-bubble ${t.line}`}>{t.direction}</div>
                                 <div className="train-info"><div className="destination">{t.destination}</div></div>
                                 <div className="minutes-box">
@@ -289,6 +440,69 @@ export default function App() {
                     })
                 )}
             </main>
+
+            {/* ── Train Detail / Route Progress View ── */}
+            {selectedTrain && (() => {
+                const stops = buildRouteStops(selectedTrain, currentStation);
+                const line = (selectedTrain.line || "GRAY").toUpperCase();
+                const lineColor = { RED: '#ED1C24', GOLD: '#FFA500', BLUE: '#009DDC', GREEN: '#69BE28' }[line] || '#999';
+
+                let headerTime = selectedTrain.waiting_time;
+                if (headerTime === "Arriving") headerTime = "ARR";
+                else if (headerTime === "Boarding") headerTime = "BRD";
+                else if (headerTime === "Departing") headerTime = "DEP";
+                else headerTime = headerTime.replace(' min', '') + " min";
+
+                return (
+                    <div className={`detail-overlay${detailVisible ? ' detail-visible' : ''}`}>
+                        <div className="detail-panel">
+                            <div className="detail-header" style={{ borderBottom: `3px solid ${lineColor}` }}>
+                                <button className="detail-back" onClick={closeTrainDetail}>&#8592;</button>
+                                <div className="detail-header-info">
+                                    <div className="detail-destination">{selectedTrain.destination}</div>
+                                    <div className="detail-meta">
+                                        <span className={`line-badge ${line}`}>{selectedTrain.direction}</span>
+                                        <span className="detail-arrival-time">{headerTime}</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="detail-stops-container">
+                                {stops.length === 0 ? (
+                                    <div className="detail-no-route">Route data unavailable for this train.</div>
+                                ) : (
+                                    stops.map((stop, idx) => {
+                                        const isFirst = idx === 0;
+                                        const isLast = idx === stops.length - 1;
+                                        let timeLabel = "";
+                                        if (stop.isCurrent) {
+                                            timeLabel = headerTime;
+                                        } else if (!stop.isPassed) {
+                                            const m = stop.minutesFromNow;
+                                            if (m <= 0) timeLabel = "ARR";
+                                            else timeLabel = m + " min";
+                                        }
+                                        return (
+                                            <div key={stop.name} ref={stop.isCurrent ? currentStopRef : null} className={`detail-stop${stop.isCurrent ? ' stop-current' : ''}${stop.isPassed ? ' stop-passed' : ''}${stop.isDestination ? ' stop-destination' : ''}`}>
+                                                {/* Left rail */}
+                                                <div className="stop-rail">
+                                                    <div className="stop-rail-line stop-rail-top" style={{ background: isFirst ? 'transparent' : lineColor, opacity: isFirst ? 0 : (stop.isPassed ? 0.3 : 1) }} />
+                                                    <div className={`stop-dot${stop.isCurrent ? ' stop-dot-current' : ''}`} style={{ background: stop.isPassed ? 'transparent' : lineColor, border: stop.isPassed ? `2px solid ${lineColor}` : 'none', opacity: stop.isPassed ? 0.3 : 1 }} />
+                                                    <div className="stop-rail-line stop-rail-bottom" style={{ background: lineColor, opacity: (isLast || stop.isDestination) ? 0 : (stop.isPassed ? 0.3 : 1) }} />
+                                                </div>
+                                                {/* Station name + time */}
+                                                <div className="stop-info">
+                                                    <div className="stop-name">{titleCase(stop.name)}</div>
+                                                    {timeLabel ? <div className="stop-time">{timeLabel}</div> : null}
+                                                </div>
+                                            </div>
+                                        );
+                                    })
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                );
+            })()}
 
             <svg id="theme-toggle" viewBox="0 0 24 24" fill="currentColor" onClick={() => setIsDarkMode(!isDarkMode)}>
                 {isDarkMode ? (
