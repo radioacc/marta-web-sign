@@ -382,7 +382,6 @@ main {
     }
 }
 
-/* --- 6. MOBILE RESPONSIVE TWEAKS --- */
 /* --- 6. SPLIT PANE LAYOUT --- */
 .split-main {
     flex-grow: 1;

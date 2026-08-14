@@ -99,7 +99,7 @@ const EW_STATIONS = new Set([
     "ASHBY", "AVONDALE", "BANKHEAD", "DECATUR", "EAST LAKE",
     "EDGEWOOD CANDLER PARK", "GEORGIA STATE", "HAMILTON E HOLMES",
     "INDIAN CREEK", "INMAN PARK", "KENSINGTON", "KING MEMORIAL",
-    "VINE CITY", "WEST END", "WEST LAKE"
+    "VINE CITY", "WEST LAKE"
 ]);
 
 const parseSecs = (value) => {
@@ -212,6 +212,11 @@ export default function App() {
     const [isDarkMode, setIsDarkMode] = useState(() => {
         return localStorage.getItem('marta_theme') !== 'light';
     });
+    const currentStationRef = useRef(currentStation);
+
+    useEffect(() => {
+        currentStationRef.current = currentStation;
+    }, [currentStation]);
 
     useEffect(() => {
         if (isDarkMode) document.body.classList.add('dark-mode');
@@ -428,12 +433,12 @@ export default function App() {
                 const d = getDist(position.coords.latitude, position.coords.longitude, coords.lat, coords.lon);
                 if (d < minDist) { minDist = d; nearest = station; }
             }
-            if (nearest && nearest !== currentStation) {
+            if (nearest && nearest !== currentStationRef.current) {
                 showToast(`📍 Found nearest: ${titleCase(nearest)}`);
                 setCurrentStation(nearest);
             }
         });
-    }, [currentStation, locationOverridden]);
+    }, [locationOverridden]);
 
     // Build the ordered list of stations with estimated arrival times for the detail view.
     const buildRouteStops = (train, fromStation) => {
@@ -446,8 +451,8 @@ export default function App() {
         const from = normalizeStationName(fromStation);
         if (!from || !dest) return [];
 
-        let fromIdx = route.findIndex(s => s === from || from.includes(s) || s.includes(from));
-        let destIdx = route.findIndex(s => s === dest || dest.includes(s) || s.includes(dest));
+        let fromIdx = route.findIndex(s => s === from);
+        let destIdx = route.findIndex(s => s === dest);
 
         if (fromIdx === -1 || destIdx === -1) return [];
 
@@ -464,7 +469,7 @@ export default function App() {
 
         const arrivalSecs = parseSecs(train.waiting_seconds);
         const arrivalMins = arrivalSecs === null ? 0 : Math.max(0, Math.ceil(arrivalSecs / 60));
-        const curIdxInOrdered = ordered.findIndex(s => s === from || from.includes(s) || s.includes(from));
+        const curIdxInOrdered = ordered.findIndex(s => s === from);
         if (curIdxInOrdered === -1) return [];
 
         ordered.forEach((stationName, idx) => {
@@ -519,20 +524,20 @@ export default function App() {
     };
 
     // Close train detail
-    const closeTrainDetail = () => {
+    const closeTrainDetail = useCallback(() => {
         setDetailVisible(false);
         setTimeout(() => {
             setSelectedTrain(null);
             setSelectedTrainKey(null);
         }, 350);
-    };
+    }, []);
 
     // Escape key closes detail view
     useEffect(() => {
         const onKey = (e) => { if (e.key === 'Escape') closeTrainDetail(); };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, []);
+    }, [closeTrainDetail]);
 
     // --- 4. THE CLEAN SWAP ---
     const handleStationChange = (station) => {
