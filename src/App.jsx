@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
 
 const STATION_LIST = [
@@ -19,6 +19,11 @@ const EW_STATIONS = new Set([
     "INDIAN CREEK", "INMAN PARK", "KENSINGTON", "KING MEMORIAL",
     "VINE CITY", "WEST END", "WEST LAKE"
 ]);
+
+// How long (seconds) to keep showing DEP after a train's countdown hits zero
+const DEP_DISPLAY_SECONDS = 20;
+// Station override TTL in milliseconds (2 hours)
+const STATION_OVERRIDE_TTL_MS = 2 * 60 * 60 * 1000;
 
 const STATION_COORDS = {
     "AIRPORT": { lat: 33.6407, lon: -84.4440 },
@@ -62,9 +67,26 @@ const STATION_COORDS = {
     "WEST LAKE": { lat: 33.7531, lon: -84.4461 }
 };
 
+// Build a stable unique key per train so we can match across refreshes
+const trainKey = (t) => `${t.line}_${t.direction}_${t.destination}`;
+
 export default function App() {
+    // --- Station: restore from localStorage, check 2-hour TTL ---
     const [currentStation, setCurrentStation] = useState(() => {
-        return localStorage.getItem('marta_user_station') || "MIDTOWN";
+        const ts = parseInt(localStorage.getItem('marta_station_ts') || '0', 10);
+        const station = localStorage.getItem('marta_user_station');
+        if (station && Date.now() - ts < STATION_OVERRIDE_TTL_MS) return station;
+        // Expired or never set — clear and fall back to MIDTOWN until geo runs
+        localStorage.removeItem('marta_user_station');
+        localStorage.removeItem('marta_station_ts');
+        return "MIDTOWN";
+    });
+
+    // Track whether the user's manual selection is still active
+    const [locationOverridden, setLocationOverridden] = useState(() => {
+        const ts = parseInt(localStorage.getItem('marta_station_ts') || '0', 10);
+        const station = localStorage.getItem('marta_user_station');
+        return !!(station && Date.now() - ts < STATION_OVERRIDE_TTL_MS);
     });
 
     // 1. THE OMNI-CACHE: Load every saved station into memory instantly
@@ -85,17 +107,16 @@ export default function App() {
     const [showStationModal, setShowStationModal] = useState(false);
     const [showFilterModal, setShowFilterModal] = useState(false);
     const [toastMsg, setToastMsg] = useState("");
-    const [locationOverridden, setLocationOverridden] = useState(() => {
-        return localStorage.getItem('marta_user_station') !== null;
-    });
 
+    // Theme: default dark (night). Persists forever.
     const [isDarkMode, setIsDarkMode] = useState(() => {
         return localStorage.getItem('marta_theme') !== 'light';
     });
 
+    // Split pane: default OFF (single pane). Persists forever.
     const [isSplitPane, setIsSplitPane] = useState(() => {
         const saved = localStorage.getItem('marta_split_pane');
-        return saved === null ? true : saved === 'true';
+        return saved === 'true';
     });
 
     useEffect(() => {
@@ -112,21 +133,29 @@ export default function App() {
         });
     };
 
-    // Determine if station is an E/W station (Blue/Green lines only)
+    // --- Station type helpers ---
     const isEastWest = EW_STATIONS.has(currentStation);
     const isFivePoints = currentStation === "FIVE POINTS";
 
-    // Split directions — the MARTA API returns single-letter direction values: N, S, E, W
+    // For Five Points: pane A = N+S, pane B = E+W
+    // For EW stations: top = W, bottom = E
+    // For NS stations: top = N, bottom = S
     const getDirectionGroup = (direction) => {
         const d = (direction || '').toUpperCase().charAt(0);
+        if (isFivePoints) return (d === 'N' || d === 'S') ? 'top' : 'bottom';
         if (isEastWest) return d === 'W' ? 'top' : 'bottom';
         return d === 'N' ? 'top' : 'bottom';
     };
 
-    const topLabel = isEastWest ? 'Westbound' : 'Northbound';
-    const bottomLabel = isEastWest ? 'Eastbound' : 'Southbound';
+    const topLabel = isFivePoints ? 'North · South' : (isEastWest ? 'Westbound' : 'Northbound');
+    const bottomLabel = isFivePoints ? 'East · West' : (isEastWest ? 'Eastbound' : 'Southbound');
 
-    // --- 2. IRONCLAD FETCH LOGIC (Now writes directly to the Omni-Cache) ---
+    // --- 2. IRONCLAD FETCH LOGIC ---
+    // We use a ref to hold the current cache so the merge logic can compare without
+    // needing trainCache in the dep array (which would cause re-registration of the interval).
+    const trainCacheRef = useRef({});
+    useEffect(() => { trainCacheRef.current = trainCache; }, [trainCache]);
+
     const fetchTrains = useCallback(async () => {
         setIsLoading(true);
         try {
@@ -135,9 +164,51 @@ export default function App() {
             const data = await response.json();
 
             if (Array.isArray(data) && data.length > 0) {
-                // Only update the specific station we are looking at
-                setTrainCache(prev => ({ ...prev, [currentStation]: data }));
-                localStorage.setItem(`marta_backup_${currentStation}`, JSON.stringify(data));
+                setTrainCache(prev => {
+                    const existing = prev[currentStation] || [];
+                    // Build a map of current locally-ticked trains by key
+                    const existingMap = {};
+                    existing.forEach(t => { existingMap[trainKey(t)] = t; });
+
+                    // Merge: for each train from the API, only lower (or replace) the time,
+                    // never let a fresh API value push the time BACK UP past what we already show.
+                    const merged = data.map(apiTrain => {
+                        const key = trainKey(apiTrain);
+                        const local = existingMap[key];
+                        if (!local) return apiTrain; // brand-new train
+
+                        const apiSecs = parseInt(apiTrain.waiting_seconds, 10);
+                        const localSecs = parseInt(local.waiting_seconds, 10);
+
+                        // If local train is in DEP phase, keep DEP
+                        if (local.waiting_time === 'Departing') return local;
+
+                        // Only accept the API value if it's lower than or within 30s of
+                        // what we currently show (tolerates small clock drift between polls).
+                        // If the API sends a higher value it means the train was re-scheduled
+                        // or the API reset — accept it only when the difference is > 45s
+                        // (a genuine re-sync) to avoid the 4→3→4 flicker.
+                        if (!isNaN(apiSecs) && !isNaN(localSecs)) {
+                            if (apiSecs > localSecs + 45) {
+                                // Genuine re-sync from the API (e.g. train was delayed)
+                                return apiTrain;
+                            }
+                            if (apiSecs <= localSecs) {
+                                // API is lower or equal — fresher, use it
+                                return apiTrain;
+                            }
+                            // API is slightly higher than local tick — keep local (anti-flicker)
+                            return local;
+                        }
+                        return apiTrain;
+                    });
+
+                    merged.sort((a, b) => parseInt(a.waiting_seconds) - parseInt(b.waiting_seconds));
+
+                    const updated = { ...prev, [currentStation]: merged };
+                    localStorage.setItem(`marta_backup_${currentStation}`, JSON.stringify(merged));
+                    return updated;
+                });
                 setError(false);
             } else {
                 console.warn("MARTA sent empty data. Ignoring glitch to prevent blank screen.");
@@ -165,11 +236,22 @@ export default function App() {
                         if (t.status === 'Scheduled') return t;
 
                         let secs = parseInt(t.waiting_seconds, 10);
-                        if (isNaN(secs) || secs <= 0) return t;
+
+                        // DEP phase: train has arrived; count down its departure window
+                        if (t.waiting_time === 'Departing') {
+                            const depSecs = parseInt(t.dep_seconds, 10) - 1;
+                            if (depSecs <= 0) return null; // remove from list
+                            return { ...t, dep_seconds: depSecs.toString() };
+                        }
+
+                        if (isNaN(secs) || secs <= 0) {
+                            // Transition to DEP phase
+                            return { ...t, waiting_seconds: '0', waiting_time: 'Departing', dep_seconds: String(DEP_DISPLAY_SECONDS) };
+                        }
 
                         secs -= 1;
 
-                        let newTimeStr = t.waiting_time;
+                        let newTimeStr;
                         if (secs <= 30) {
                             newTimeStr = "Arriving";
                         } else {
@@ -177,7 +259,7 @@ export default function App() {
                         }
 
                         return { ...t, waiting_seconds: secs.toString(), waiting_time: newTimeStr };
-                    });
+                    }).filter(Boolean); // remove nulls (expired DEP trains)
 
                     newCache[station] = tickedTrains;
                     stateChanged = true;
@@ -197,7 +279,7 @@ export default function App() {
         return () => clearInterval(interval);
     }, [fetchTrains]);
 
-    // Geolocation
+    // Geolocation — runs when not overridden, or when override expires
     useEffect(() => {
         if (!navigator.geolocation || locationOverridden) return;
 
@@ -224,6 +306,21 @@ export default function App() {
         });
     }, [locationOverridden]);
 
+    // Check every minute whether the station override TTL has expired
+    useEffect(() => {
+        if (!locationOverridden) return;
+        const check = setInterval(() => {
+            const ts = parseInt(localStorage.getItem('marta_station_ts') || '0', 10);
+            if (Date.now() - ts >= STATION_OVERRIDE_TTL_MS) {
+                localStorage.removeItem('marta_user_station');
+                localStorage.removeItem('marta_station_ts');
+                setLocationOverridden(false);
+                showToast("📍 Returning to nearest station");
+            }
+        }, 60 * 1000);
+        return () => clearInterval(check);
+    }, [locationOverridden]);
+
     const showToast = (msg) => {
         setToastMsg(msg);
         setTimeout(() => setToastMsg(""), 3000);
@@ -240,10 +337,8 @@ export default function App() {
         setActiveFilter("ALL");
         setLocationOverridden(true);
         localStorage.setItem('marta_user_station', station);
+        localStorage.setItem('marta_station_ts', String(Date.now()));
         setShowStationModal(false);
-
-        // We NO LONGER clear the array here! 
-        // The renderer now dynamically pulls from the trainCache.
         setIsLoading(true);
     };
 
@@ -259,10 +354,11 @@ export default function App() {
         let mainTime = t.waiting_time;
         let subLabel = "MIN";
         if (mainTime === "Arriving") { mainTime = "ARR"; subLabel = ""; }
+        else if (mainTime === "Departing") { mainTime = "DEP"; subLabel = ""; }
         else if (mainTime === "Boarding") { mainTime = "BRD"; subLabel = ""; }
         else { mainTime = mainTime.replace(' min', ''); }
         return (
-            <div key={i} className={`train-row status-real`}>
+            <div key={`${trainKey(t)}_${i}`} className={`train-row status-real`}>
                 <div className={`line-bubble ${t.line}`}>{t.direction}</div>
                 <div className="train-info"><div className="destination">{t.destination}</div></div>
                 <div className="minutes-box">
@@ -273,7 +369,8 @@ export default function App() {
         );
     };
 
-    const showSplit = isSplitPane && !isFivePoints;
+    // Five Points always shows split (N+S / E+W); toggle has no effect there
+    const showSplit = isSplitPane || isFivePoints;
     const topTrains = showSplit ? visibleTrains.filter(t => getDirectionGroup(t.direction) === 'top') : [];
     const bottomTrains = showSplit ? visibleTrains.filter(t => getDirectionGroup(t.direction) === 'bottom') : [];
 
@@ -330,7 +427,7 @@ export default function App() {
                 </main>
             )}
 
-            {/* Split/Single pane toggle — bottom left */}
+            {/* Split/Single pane toggle — bottom left. Hidden for Five Points (always split). */}
             {!isFivePoints && (
                 <button
                     id="split-toggle"
@@ -398,3 +495,4 @@ export default function App() {
         </div>
     );
 }
+
