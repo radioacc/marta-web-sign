@@ -89,6 +89,20 @@ const normalizeRealtimeTrain = (t) => {
     };
 };
 
+const sortTrainByTime = (a, b) => {
+    const aIsDeparting = a.waiting_time === 'Departing';
+    const bIsDeparting = b.waiting_time === 'Departing';
+    if (aIsDeparting && !bIsDeparting) return 1;
+    if (!aIsDeparting && bIsDeparting) return -1;
+
+    const aSecs = parseSecs(a.waiting_seconds);
+    const bSecs = parseSecs(b.waiting_seconds);
+    if (aSecs === null && bSecs === null) return 0;
+    if (aSecs === null) return 1;
+    if (bSecs === null) return -1;
+    return aSecs - bSecs;
+};
+
 // Build a stable unique key per train so we can match across refreshes
 const trainKey = (t) => t.train_id
     ? `${t.line}_${t.direction}_${t.train_id}`
@@ -119,7 +133,7 @@ export default function App() {
         STATION_LIST.forEach(s => {
             const saved = localStorage.getItem(`marta_backup_${s}`);
             if (saved) {
-                try { initialCache[s] = JSON.parse(saved); } catch (e) { }
+                try { initialCache[s] = JSON.parse(saved); } catch { localStorage.removeItem(`marta_backup_${s}`); }
             }
         });
         return initialCache;
@@ -131,6 +145,11 @@ export default function App() {
     const [showStationModal, setShowStationModal] = useState(false);
     const [showFilterModal, setShowFilterModal] = useState(false);
     const [toastMsg, setToastMsg] = useState("");
+
+    const showToast = useCallback((msg) => {
+        setToastMsg(msg);
+        setTimeout(() => setToastMsg(""), 3000);
+    }, []);
 
     // Theme: default dark (night). Persists forever.
     const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -232,7 +251,7 @@ export default function App() {
                         return normalizeRealtimeTrain(apiTrain);
                     });
 
-                    merged.sort((a, b) => parseInt(a.waiting_seconds) - parseInt(b.waiting_seconds));
+                    merged.sort(sortTrainByTime);
 
                     const updated = { ...prev, [currentStation]: merged };
                     localStorage.setItem(`marta_backup_${currentStation}`, JSON.stringify(merged));
@@ -328,7 +347,7 @@ export default function App() {
                 setCurrentStation(nearest);
             }
         });
-    }, [locationOverridden]);
+    }, [locationOverridden, currentStation, showToast]);
 
     // Check every minute whether the station override TTL has expired
     useEffect(() => {
@@ -343,12 +362,7 @@ export default function App() {
             }
         }, 60 * 1000);
         return () => clearInterval(check);
-    }, [locationOverridden]);
-
-    const showToast = (msg) => {
-        setToastMsg(msg);
-        setTimeout(() => setToastMsg(""), 3000);
-    };
+    }, [locationOverridden, showToast]);
 
     const titleCase = (str) => {
         if (!str) return "";
@@ -374,7 +388,7 @@ export default function App() {
         ? "SEC District"
         : titleCase(currentStation.replace(/ STATION/i, ''));
 
-    const renderTrainRow = (t, i) => {
+    const renderTrainRow = (t) => {
         let mainTime = t.waiting_time;
         let subLabel = "MIN";
         if (mainTime === "Arriving") { mainTime = "ARR"; subLabel = ""; }
@@ -382,7 +396,7 @@ export default function App() {
         else if (mainTime === "Boarding") { mainTime = "BRD"; subLabel = ""; }
         else { mainTime = mainTime.replace(' min', ''); }
         return (
-            <div key={`${trainKey(t)}_${i}`} className={`train-row status-real`}>
+            <div key={trainKey(t)} className={`train-row status-real`}>
                 <div className={`line-bubble ${t.line}`}>{t.direction}</div>
                 <div className="train-info"><div className="destination">{t.destination}</div></div>
                 <div className="minutes-box">
