@@ -47,6 +47,7 @@ export async function onRequest(context) {
                     destination: cleanDest(t.DESTINATION || t.Destination),
                     line: t.LINE || t.Line,
                     direction: t.DIRECTION || t.Direction,
+                    train_id: t.TRAIN_ID || t.TrainID || t.TRAINID || null,
                     waiting_time: t.WAITING_TIME || t.WaitingTime,
                     waiting_seconds: t.WAITING_SECONDS || t.WaitingSeconds || "9999",
                     status: 'Realtime'
@@ -69,7 +70,7 @@ export async function onRequest(context) {
         
         return response;
 
-    } catch (err) {
+    } catch {
         return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } });
     }
 }

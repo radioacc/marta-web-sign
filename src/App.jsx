@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
 
 const STATION_LIST = [
@@ -11,6 +11,19 @@ const STATION_LIST = [
     "NORTH SPRINGS", "OAKLAND CITY", "PEACHTREE CENTER", "SANDY SPRINGS",
     "SEC DISTRICT", "VINE CITY", "WEST END", "WEST LAKE"
 ];
+
+// Stations served exclusively or primarily by the East-West (Blue/Green) lines
+const EW_STATIONS = new Set([
+    "ASHBY", "AVONDALE", "BANKHEAD", "DECATUR", "EAST LAKE",
+    "EDGEWOOD CANDLER PARK", "GEORGIA STATE", "HAMILTON E HOLMES",
+    "INDIAN CREEK", "INMAN PARK", "KENSINGTON", "KING MEMORIAL",
+    "VINE CITY", "WEST END", "WEST LAKE"
+]);
+
+// How long (seconds) to keep showing DEP after a train's countdown hits zero
+const DEP_DISPLAY_SECONDS = 20;
+// Station override TTL in milliseconds (2 hours)
+const STATION_OVERRIDE_TTL_MS = 2 * 60 * 60 * 1000;
 
 const STATION_COORDS = {
     "AIRPORT": { lat: 33.6407, lon: -84.4440 },
@@ -54,9 +67,64 @@ const STATION_COORDS = {
     "WEST LAKE": { lat: 33.7531, lon: -84.4461 }
 };
 
+const parseSecs = (value) => {
+    const secs = Number.parseInt(value, 10);
+    return Number.isFinite(secs) ? secs : null;
+};
+
+const waitingTimeFromSeconds = (secs) => {
+    if (!Number.isFinite(secs)) return null;
+    if (secs <= 30) return "Arriving";
+    return `${Math.ceil(secs / 60)} min`;
+};
+
+const normalizeRealtimeTrain = (t) => {
+    if (!t || t.status === "Scheduled" || t.waiting_time === "Departing") return t;
+    const secs = parseSecs(t.waiting_seconds);
+    if (secs === null) return t;
+    return {
+        ...t,
+        waiting_seconds: String(Math.max(secs, 0)),
+        waiting_time: waitingTimeFromSeconds(secs)
+    };
+};
+
+const sortTrainByTime = (a, b) => {
+    const aIsDeparting = a.waiting_time === 'Departing';
+    const bIsDeparting = b.waiting_time === 'Departing';
+    if (aIsDeparting && !bIsDeparting) return 1;
+    if (!aIsDeparting && bIsDeparting) return -1;
+
+    const aSecs = parseSecs(a.waiting_seconds);
+    const bSecs = parseSecs(b.waiting_seconds);
+    if (aSecs === null && bSecs === null) return 0;
+    if (aSecs === null) return 1;
+    if (bSecs === null) return -1;
+    return aSecs - bSecs;
+};
+
+// Build a stable unique key per train so we can match across refreshes
+const trainKey = (t) => t.train_id
+    ? `${t.line}_${t.direction}_${t.train_id}`
+    : `${t.line}_${t.direction}_${t.destination}`;
+
 export default function App() {
+    // --- Station: restore from localStorage, check 2-hour TTL ---
     const [currentStation, setCurrentStation] = useState(() => {
-        return localStorage.getItem('marta_user_station') || "MIDTOWN";
+        const ts = parseInt(localStorage.getItem('marta_station_ts') || '0', 10);
+        const station = localStorage.getItem('marta_user_station');
+        if (station && Date.now() - ts < STATION_OVERRIDE_TTL_MS) return station;
+        // Expired or never set — clear and fall back to MIDTOWN until geo runs
+        localStorage.removeItem('marta_user_station');
+        localStorage.removeItem('marta_station_ts');
+        return "MIDTOWN";
+    });
+
+    // Track whether the user's manual selection is still active
+    const [locationOverridden, setLocationOverridden] = useState(() => {
+        const ts = parseInt(localStorage.getItem('marta_station_ts') || '0', 10);
+        const station = localStorage.getItem('marta_user_station');
+        return !!(station && Date.now() - ts < STATION_OVERRIDE_TTL_MS);
     });
 
     // 1. THE OMNI-CACHE: Load every saved station into memory instantly
@@ -65,7 +133,7 @@ export default function App() {
         STATION_LIST.forEach(s => {
             const saved = localStorage.getItem(`marta_backup_${s}`);
             if (saved) {
-                try { initialCache[s] = JSON.parse(saved); } catch (e) { }
+                try { initialCache[s] = JSON.parse(saved); } catch { localStorage.removeItem(`marta_backup_${s}`); }
             }
         });
         return initialCache;
@@ -77,12 +145,21 @@ export default function App() {
     const [showStationModal, setShowStationModal] = useState(false);
     const [showFilterModal, setShowFilterModal] = useState(false);
     const [toastMsg, setToastMsg] = useState("");
-    const [locationOverridden, setLocationOverridden] = useState(() => {
-        return localStorage.getItem('marta_user_station') !== null;
-    });
 
+    const showToast = useCallback((msg) => {
+        setToastMsg(msg);
+        setTimeout(() => setToastMsg(""), 3000);
+    }, []);
+
+    // Theme: default dark (night). Persists forever.
     const [isDarkMode, setIsDarkMode] = useState(() => {
         return localStorage.getItem('marta_theme') !== 'light';
+    });
+
+    // Split pane: default OFF (single pane). Persists forever.
+    const [isSplitPane, setIsSplitPane] = useState(() => {
+        const saved = localStorage.getItem('marta_split_pane');
+        return saved === 'true';
     });
 
     useEffect(() => {
@@ -91,7 +168,37 @@ export default function App() {
         localStorage.setItem('marta_theme', isDarkMode ? 'dark' : 'light');
     }, [isDarkMode]);
 
-    // --- 2. IRONCLAD FETCH LOGIC (Now writes directly to the Omni-Cache) ---
+    const toggleSplitPane = () => {
+        setIsSplitPane(prev => {
+            const next = !prev;
+            localStorage.setItem('marta_split_pane', String(next));
+            return next;
+        });
+    };
+
+    // --- Station type helpers ---
+    const isEastWest = EW_STATIONS.has(currentStation);
+    const isFivePoints = currentStation === "FIVE POINTS";
+
+    // For Five Points: pane A = N+S, pane B = E+W
+    // For EW stations: top = W, bottom = E
+    // For NS stations: top = N, bottom = S
+    const getDirectionGroup = (direction) => {
+        const d = (direction || '').toUpperCase().charAt(0);
+        if (isFivePoints) return (d === 'N' || d === 'S') ? 'top' : 'bottom';
+        if (isEastWest) return d === 'W' ? 'top' : 'bottom';
+        return d === 'N' ? 'top' : 'bottom';
+    };
+
+    const topLabel = isFivePoints ? 'North · South' : (isEastWest ? 'Westbound' : 'Northbound');
+    const bottomLabel = isFivePoints ? 'East · West' : (isEastWest ? 'Eastbound' : 'Southbound');
+
+    // --- 2. IRONCLAD FETCH LOGIC ---
+    // We use a ref to hold the current cache so the merge logic can compare without
+    // needing trainCache in the dep array (which would cause re-registration of the interval).
+    const trainCacheRef = useRef({});
+    useEffect(() => { trainCacheRef.current = trainCache; }, [trainCache]);
+
     const fetchTrains = useCallback(async () => {
         setIsLoading(true);
         try {
@@ -100,9 +207,56 @@ export default function App() {
             const data = await response.json();
 
             if (Array.isArray(data) && data.length > 0) {
-                // Only update the specific station we are looking at
-                setTrainCache(prev => ({ ...prev, [currentStation]: data }));
-                localStorage.setItem(`marta_backup_${currentStation}`, JSON.stringify(data));
+                setTrainCache(prev => {
+                    const existing = prev[currentStation] || [];
+                    // Build a map of current locally-ticked trains by key.
+                    // We keep arrays so duplicate destinations don't collapse into one entry.
+                    const existingMap = {};
+                    existing.forEach(t => {
+                        const key = trainKey(t);
+                        if (!existingMap[key]) existingMap[key] = [];
+                        existingMap[key].push(t);
+                    });
+
+                    // Merge: for each train from the API, only lower (or replace) the time,
+                    // never let a fresh API value push the time BACK UP past what we already show.
+                    const merged = data.map(apiTrain => {
+                        const key = trainKey(apiTrain);
+                        const local = existingMap[key]?.shift();
+                        if (!local) return normalizeRealtimeTrain(apiTrain); // brand-new train
+
+                        const apiSecs = parseSecs(apiTrain.waiting_seconds);
+                        const localSecs = parseSecs(local.waiting_seconds);
+
+                        // If local train is in DEP phase, keep DEP
+                        if (local.waiting_time === 'Departing') return local;
+
+                        // Only accept the API value if it's lower than or within 30s of
+                        // what we currently show (tolerates small clock drift between polls).
+                        // If the API sends a higher value it means the train was re-scheduled
+                        // or the API reset — accept it only when the difference is > 45s
+                        // (a genuine re-sync) to avoid the 4→3→4 flicker.
+                        if (apiSecs !== null && localSecs !== null) {
+                            if (apiSecs > localSecs + 45) {
+                                // Genuine re-sync from the API (e.g. train was delayed)
+                                return normalizeRealtimeTrain(apiTrain);
+                            }
+                            if (apiSecs <= localSecs) {
+                                // API is lower or equal — fresher, use it
+                                return normalizeRealtimeTrain(apiTrain);
+                            }
+                            // API is slightly higher than local tick — keep local (anti-flicker)
+                            return local;
+                        }
+                        return normalizeRealtimeTrain(apiTrain);
+                    });
+
+                    merged.sort(sortTrainByTime);
+
+                    const updated = { ...prev, [currentStation]: merged };
+                    localStorage.setItem(`marta_backup_${currentStation}`, JSON.stringify(merged));
+                    return updated;
+                });
                 setError(false);
             } else {
                 console.warn("MARTA sent empty data. Ignoring glitch to prevent blank screen.");
@@ -129,20 +283,26 @@ export default function App() {
                     const tickedTrains = stationTrains.map(t => {
                         if (t.status === 'Scheduled') return t;
 
-                        let secs = parseInt(t.waiting_seconds, 10);
-                        if (isNaN(secs) || secs <= 0) return t;
+                        let secs = parseSecs(t.waiting_seconds);
+
+                        // DEP phase: train has arrived; count down its departure window
+                        if (t.waiting_time === 'Departing') {
+                            const depSecs = (parseSecs(t.dep_seconds) ?? 0) - 1;
+                            if (depSecs <= 0) return null; // remove from list
+                            return { ...t, dep_seconds: depSecs.toString() };
+                        }
+
+                        if (secs === null || secs <= 0) {
+                            // Transition to DEP phase
+                            return { ...t, waiting_seconds: '0', waiting_time: 'Departing', dep_seconds: String(DEP_DISPLAY_SECONDS) };
+                        }
 
                         secs -= 1;
 
-                        let newTimeStr = t.waiting_time;
-                        if (secs <= 30) {
-                            newTimeStr = "Arriving";
-                        } else {
-                            newTimeStr = Math.ceil(secs / 60) + " min";
-                        }
+                        const newTimeStr = waitingTimeFromSeconds(secs);
 
                         return { ...t, waiting_seconds: secs.toString(), waiting_time: newTimeStr };
-                    });
+                    }).filter(Boolean); // remove nulls (expired DEP trains)
 
                     newCache[station] = tickedTrains;
                     stateChanged = true;
@@ -162,7 +322,7 @@ export default function App() {
         return () => clearInterval(interval);
     }, [fetchTrains]);
 
-    // Geolocation
+    // Geolocation — runs when not overridden, or when override expires
     useEffect(() => {
         if (!navigator.geolocation || locationOverridden) return;
 
@@ -187,12 +347,22 @@ export default function App() {
                 setCurrentStation(nearest);
             }
         });
-    }, [locationOverridden]);
+    }, [locationOverridden, currentStation, showToast]);
 
-    const showToast = (msg) => {
-        setToastMsg(msg);
-        setTimeout(() => setToastMsg(""), 3000);
-    };
+    // Check every minute whether the station override TTL has expired
+    useEffect(() => {
+        if (!locationOverridden) return;
+        const check = setInterval(() => {
+            const ts = parseInt(localStorage.getItem('marta_station_ts') || '0', 10);
+            if (Date.now() - ts >= STATION_OVERRIDE_TTL_MS) {
+                localStorage.removeItem('marta_user_station');
+                localStorage.removeItem('marta_station_ts');
+                setLocationOverridden(false);
+                showToast("📍 Returning to nearest station");
+            }
+        }, 60 * 1000);
+        return () => clearInterval(check);
+    }, [locationOverridden, showToast]);
 
     const titleCase = (str) => {
         if (!str) return "";
@@ -205,10 +375,8 @@ export default function App() {
         setActiveFilter("ALL");
         setLocationOverridden(true);
         localStorage.setItem('marta_user_station', station);
+        localStorage.setItem('marta_station_ts', String(Date.now()));
         setShowStationModal(false);
-
-        // We NO LONGER clear the array here! 
-        // The renderer now dynamically pulls from the trainCache.
         setIsLoading(true);
     };
 
@@ -219,6 +387,42 @@ export default function App() {
     const displayStation = currentStation === "OMNI"
         ? "SEC District"
         : titleCase(currentStation.replace(/ STATION/i, ''));
+
+    const renderTrainRow = (t) => {
+        let mainTime = t.waiting_time;
+        let subLabel = "MIN";
+        if (mainTime === "Arriving") { mainTime = "ARR"; subLabel = ""; }
+        else if (mainTime === "Departing") { mainTime = "DEP"; subLabel = ""; }
+        else if (mainTime === "Boarding") { mainTime = "BRD"; subLabel = ""; }
+        else { mainTime = mainTime.replace(' min', ''); }
+        return (
+            <div key={trainKey(t)} className={`train-row status-real`}>
+                <div className={`line-bubble ${t.line}`}>{t.direction}</div>
+                <div className="train-info"><div className="destination">{t.destination}</div></div>
+                <div className="minutes-box">
+                    <div className="minutes-main">{mainTime}</div>
+                    <div className="minutes-sub">{subLabel}</div>
+                </div>
+            </div>
+        );
+    };
+
+    // Five Points always shows split (N+S / E+W); toggle has no effect there
+    const showSplit = isSplitPane || isFivePoints;
+    const topTrains = showSplit ? visibleTrains.filter(t => getDirectionGroup(t.direction) === 'top') : [];
+    const bottomTrains = showSplit ? visibleTrains.filter(t => getDirectionGroup(t.direction) === 'bottom') : [];
+
+    const emptyState = (msg) => (
+        <div className="pane-empty">{msg}</div>
+    );
+
+    const trainListContent = (trains) => {
+        if (isLoading && currentTrains.length === 0) return emptyState("Fetching schedule...");
+        if (error && currentTrains.length === 0) return emptyState("Connection Error");
+        if (currentTrains.length === 0 && !isLoading) return emptyState("No trains found.");
+        if (trains.length === 0) return emptyState("No trains");
+        return trains.map(renderTrainRow);
+    };
 
     return (
         <div className="app-container">
@@ -235,35 +439,54 @@ export default function App() {
                 </div>
             </header>
 
-            {/* Dim the main container slightly if we are loading fresh data */}
-            <main style={{ transition: 'opacity 0.3s', opacity: isLoading && currentTrains.length > 0 ? 0.6 : 1 }}>
-                {isLoading && currentTrains.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>Fetching schedule...</div>
-                ) : error && currentTrains.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>Connection Error</div>
-                ) : currentTrains.length === 0 && !isLoading ? (
-                    <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>No trains found.</div>
-                ) : (
-                    visibleTrains.map((t, i) => {
-                        let mainTime = t.waiting_time;
-                        let subLabel = "MIN";
-                        if (mainTime === "Arriving") { mainTime = "ARR"; subLabel = ""; }
-                        else if (mainTime === "Boarding") { mainTime = "BRD"; subLabel = ""; }
-                        else { mainTime = mainTime.replace(' min', ''); }
+            {showSplit ? (
+                <main className="split-main">
+                    <div className="split-pane top-pane">
+                        <div className="pane-label">{topLabel}</div>
+                        <div className="pane-trains">{trainListContent(topTrains)}</div>
+                    </div>
+                    <div className="split-divider" />
+                    <div className="split-pane bottom-pane">
+                        <div className="pane-label">{bottomLabel}</div>
+                        <div className="pane-trains">{trainListContent(bottomTrains)}</div>
+                    </div>
+                </main>
+            ) : (
+                <main style={{ transition: 'opacity 0.3s', opacity: isLoading && currentTrains.length > 0 ? 0.6 : 1 }}>
+                    {isLoading && currentTrains.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>Fetching schedule...</div>
+                    ) : error && currentTrains.length === 0 ? (
+                        <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>Connection Error</div>
+                    ) : currentTrains.length === 0 && !isLoading ? (
+                        <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>No trains found.</div>
+                    ) : (
+                        visibleTrains.map(renderTrainRow)
+                    )}
+                </main>
+            )}
 
-                        return (
-                            <div key={i} className={`train-row status-real`}>
-                                <div className={`line-bubble ${t.line}`}>{t.direction}</div>
-                                <div className="train-info"><div className="destination">{t.destination}</div></div>
-                                <div className="minutes-box">
-                                    <div className="minutes-main">{mainTime}</div>
-                                    <div className="minutes-sub">{subLabel}</div>
-                                </div>
-                            </div>
-                        );
-                    })
-                )}
-            </main>
+            {/* Split/Single pane toggle — bottom left. Hidden for Five Points (always split). */}
+            {!isFivePoints && (
+                <button
+                    id="split-toggle"
+                    onClick={toggleSplitPane}
+                    title={isSplitPane ? "Switch to single pane" : "Switch to split pane"}
+                    aria-label={isSplitPane ? "Switch to single pane" : "Switch to split pane"}
+                >
+                    {isSplitPane ? (
+                        /* Single pane icon: one rectangle */
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                        </svg>
+                    ) : (
+                        /* Split pane icon: box on box */
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <rect x="3" y="3" width="18" height="8" rx="2" ry="2" />
+                            <rect x="3" y="13" width="18" height="8" rx="2" ry="2" />
+                        </svg>
+                    )}
+                </button>
+            )}
 
             <svg id="theme-toggle" viewBox="0 0 24 24" fill="currentColor" onClick={() => setIsDarkMode(!isDarkMode)}>
                 {isDarkMode ? (
