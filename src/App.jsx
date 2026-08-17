@@ -85,11 +85,23 @@ export default function App() {
         return localStorage.getItem('marta_theme') !== 'light';
     });
 
+    const [isSplitScreen, setIsSplitScreen] = useState(() => {
+        return localStorage.getItem('marta_split_screen') === 'true';
+    });
+
     useEffect(() => {
         if (isDarkMode) document.body.classList.add('dark-mode');
         else document.body.classList.remove('dark-mode');
         localStorage.setItem('marta_theme', isDarkMode ? 'dark' : 'light');
     }, [isDarkMode]);
+
+    const toggleSplitScreen = () => {
+        setIsSplitScreen(prev => {
+            const next = !prev;
+            localStorage.setItem('marta_split_screen', next ? 'true' : 'false');
+            return next;
+        });
+    };
 
     // --- 2. IRONCLAD FETCH LOGIC (Now writes directly to the Omni-Cache) ---
     const fetchTrains = useCallback(async () => {
@@ -220,8 +232,47 @@ export default function App() {
         ? "SEC District"
         : titleCase(currentStation.replace(/ STATION/i, ''));
 
+    const northboundTrains = currentTrains.filter(t => t.direction === "N");
+    const southboundTrains = currentTrains.filter(t => t.direction === "S");
+
+    const renderTrainRow = (t, i, compact = false) => {
+        let mainTime = t.waiting_time;
+        let subLabel = "MIN";
+        if (mainTime === "Arriving") { mainTime = "ARR"; subLabel = ""; }
+        else if (mainTime === "Boarding") { mainTime = "BRD"; subLabel = ""; }
+        else { mainTime = mainTime.replace(' min', ''); }
+
+        if (compact) {
+            return (
+                <div key={i} className="train-row-compact status-real">
+                    <div className={`line-bubble-compact ${t.line}`}>{t.direction}</div>
+                    <div className="destination-compact">{t.destination.charAt(0)}.</div>
+                    <div className="minutes-compact">
+                        <span className="minutes-main-compact">{mainTime}</span>
+                        <span className="minutes-sub-compact">{subLabel}</span>
+                    </div>
+                </div>
+            );
+        }
+
+        return (
+            <div key={i} className="train-row status-real">
+                <div className={`line-bubble ${t.line}`}>{t.direction}</div>
+                <div className="train-info"><div className="destination">{t.destination}</div></div>
+                <div className="minutes-box">
+                    <div className="minutes-main">{mainTime}</div>
+                    <div className="minutes-sub">{subLabel}</div>
+                </div>
+            </div>
+        );
+    };
+
+    const emptyState = (msg) => (
+        <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>{msg}</div>
+    );
+
     return (
-        <div className="app-container">
+        <div className={`app-container${isSplitScreen ? ' split-screen-active' : ''}`}>
             <header>
                 <div className="brand">TRAINS</div>
                 <div className="station-display">
@@ -230,40 +281,56 @@ export default function App() {
                 </div>
                 <div className="controls">
                     {isLoading && <div className="spinner"></div>}
+                    <button className={`nav-btn${isSplitScreen ? ' nav-btn-active' : ''}`} onClick={toggleSplitScreen}>SPLIT</button>
                     <button className="nav-btn" onClick={() => setShowFilterModal(true)}>FILTER</button>
                     <button className="nav-btn" onClick={() => setShowStationModal(true)}>STATION</button>
                 </div>
             </header>
 
-            {/* Dim the main container slightly if we are loading fresh data */}
-            <main style={{ transition: 'opacity 0.3s', opacity: isLoading && currentTrains.length > 0 ? 0.6 : 1 }}>
-                {isLoading && currentTrains.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>Fetching schedule...</div>
-                ) : error && currentTrains.length === 0 ? (
-                    <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>Connection Error</div>
-                ) : currentTrains.length === 0 && !isLoading ? (
-                    <div style={{ textAlign: 'center', padding: '50px', opacity: 0.5, fontSize: '1.5rem' }}>No trains found.</div>
-                ) : (
-                    visibleTrains.map((t, i) => {
-                        let mainTime = t.waiting_time;
-                        let subLabel = "MIN";
-                        if (mainTime === "Arriving") { mainTime = "ARR"; subLabel = ""; }
-                        else if (mainTime === "Boarding") { mainTime = "BRD"; subLabel = ""; }
-                        else { mainTime = mainTime.replace(' min', ''); }
-
-                        return (
-                            <div key={i} className={`train-row status-real`}>
-                                <div className={`line-bubble ${t.line}`}>{t.direction}</div>
-                                <div className="train-info"><div className="destination">{t.destination}</div></div>
-                                <div className="minutes-box">
-                                    <div className="minutes-main">{mainTime}</div>
-                                    <div className="minutes-sub">{subLabel}</div>
-                                </div>
-                            </div>
-                        );
-                    })
-                )}
-            </main>
+            {isSplitScreen ? (
+                <div className="split-container" style={{ opacity: isLoading && currentTrains.length > 0 ? 0.6 : 1, transition: 'opacity 0.3s' }}>
+                    <div className="split-panel">
+                        <div className="split-panel-header">NORTHBOUND</div>
+                        <div className="split-panel-body">
+                            {isLoading && northboundTrains.length === 0
+                                ? emptyState("Fetching schedule...")
+                                : error && northboundTrains.length === 0
+                                    ? emptyState("Connection Error")
+                                    : northboundTrains.length === 0 && !isLoading
+                                        ? emptyState("No trains found.")
+                                        : northboundTrains.map((t, i) => renderTrainRow(t, i, true))
+                            }
+                        </div>
+                    </div>
+                    <div className="split-divider" />
+                    <div className="split-panel">
+                        <div className="split-panel-header">SOUTHBOUND</div>
+                        <div className="split-panel-body">
+                            {isLoading && southboundTrains.length === 0
+                                ? emptyState("Fetching schedule...")
+                                : error && southboundTrains.length === 0
+                                    ? emptyState("Connection Error")
+                                    : southboundTrains.length === 0 && !isLoading
+                                        ? emptyState("No trains found.")
+                                        : southboundTrains.map((t, i) => renderTrainRow(t, i, true))
+                            }
+                        </div>
+                    </div>
+                </div>
+            ) : (
+                /* Dim the main container slightly if we are loading fresh data */
+                <main style={{ transition: 'opacity 0.3s', opacity: isLoading && currentTrains.length > 0 ? 0.6 : 1 }}>
+                    {isLoading && currentTrains.length === 0 ? (
+                        emptyState("Fetching schedule...")
+                    ) : error && currentTrains.length === 0 ? (
+                        emptyState("Connection Error")
+                    ) : currentTrains.length === 0 && !isLoading ? (
+                        emptyState("No trains found.")
+                    ) : (
+                        visibleTrains.map((t, i) => renderTrainRow(t, i, false))
+                    )}
+                </main>
+            )}
 
             <svg id="theme-toggle" viewBox="0 0 24 24" fill="currentColor" onClick={() => setIsDarkMode(!isDarkMode)}>
                 {isDarkMode ? (
