@@ -285,18 +285,13 @@ export default function App() {
                         const key = trainKey(normalizedTrain);
                         const localTrain = existingMap[key]?.shift();
 
-                        if (!localTrain) return normalizedTrain;
-                        if (localTrain.waiting_time === 'Departing') return localTrain;
+                        // If the local train is actively Departing (at the platform),
+                        // keep that status briefly so the UI doesn't flicker back to
+                        // "X min" before the ticker expires it.
+                        if (localTrain?.waiting_time === 'Departing') return localTrain;
 
-                        const apiSecs = parseSecs(normalizedTrain.waiting_seconds);
-                        const localSecs = parseSecs(localTrain.waiting_seconds);
-
-                        if (apiSecs !== null && localSecs !== null) {
-                            if (apiSecs > localSecs + 45) return normalizedTrain;
-                            if (apiSecs <= localSecs) return normalizedTrain;
-                            return localTrain;
-                        }
-
+                        // Always use fresh API data — the ticker is only an
+                        // interpolation aid between polls, not a source of truth.
                         return normalizedTrain;
                     });
 
