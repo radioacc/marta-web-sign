@@ -246,7 +246,7 @@ export default function App() {
             return (
                 <div key={i} className="train-row-compact status-real">
                     <div className={`line-bubble-compact ${t.line}`}>{t.direction}</div>
-                    <div className="destination-compact">{t.destination.charAt(0)}.</div>
+                    <div className="destination-compact">{t.destination.length > 6 ? t.destination.slice(0, 5) + '.' : t.destination}</div>
                     <div className="minutes-compact">
                         <span className="minutes-main-compact">{mainTime}</span>
                         <span className="minutes-sub-compact">{subLabel}</span>

@@ -473,10 +473,7 @@ button.nav-btn-active {
     border-color: #888;
 }
 
-.dark-mode button.nav-btn-active {
-    background-color: #555;
-    border-color: #888;
-}
+/* --- 6. MOBILE RESPONSIVE TWEAKS --- */
 @media (max-width: 600px) {
     header {
         height: 60px;
