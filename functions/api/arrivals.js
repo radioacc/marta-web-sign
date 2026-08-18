@@ -1,7 +1,7 @@
 export async function onRequest(context) {
     const { request, env } = context;
     const { searchParams } = new URL(request.url);
-    const station = searchParams.get('station') || 'MIDTOWN';
+    const station = (searchParams.get('station') || 'MIDTOWN').toUpperCase();
     const apiKey = env.MARTA_API_KEY;
 
     if (!apiKey) return new Response(JSON.stringify({ error: "API Key missing." }), { status: 500 });
@@ -27,7 +27,8 @@ export async function onRequest(context) {
         if (data && data.Trains) data = data.Trains;
         if (!Array.isArray(data)) data = [data];
 
-        const target = station.toUpperCase().replace(" STATION", "");
+        const target = station.replace(" STATION", "");
+        const includeAllStations = target === 'ALL';
         const results = [];
 
         const cleanDest = (text) => {
@@ -41,12 +42,13 @@ export async function onRequest(context) {
         data.forEach(t => {
             if (!t) return;
             const tStation = (t.STATION || t.Station || "").toUpperCase();
-            if (tStation.includes(target)) {
+            if (includeAllStations || tStation.includes(target)) {
                 results.push({
                     station: tStation,
                     destination: cleanDest(t.DESTINATION || t.Destination),
                     line: t.LINE || t.Line,
                     direction: t.DIRECTION || t.Direction,
+                    train_id: t.TRAIN_ID || t.TrainID || t.TRAINID || null,
                     waiting_time: t.WAITING_TIME || t.WaitingTime,
                     waiting_seconds: t.WAITING_SECONDS || t.WaitingSeconds || "9999",
                     status: 'Realtime'
@@ -69,7 +71,7 @@ export async function onRequest(context) {
         
         return response;
 
-    } catch (err) {
+    } catch {
         return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } });
     }
 }
