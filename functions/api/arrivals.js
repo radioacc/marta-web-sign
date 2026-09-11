@@ -1,10 +1,14 @@
-export async function onRequest(context) {
-    const { request, env } = context;
+export async function handleArrivalsRequest(request, env, waitUntil = () => {}) {
     const { searchParams } = new URL(request.url);
     const station = searchParams.get('station') || 'MIDTOWN';
     const apiKey = env.MARTA_API_KEY;
 
-    if (!apiKey) return new Response(JSON.stringify({ error: "API Key missing." }), { status: 500 });
+    if (!apiKey) {
+        return new Response(JSON.stringify({ error: "API Key missing." }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" }
+        });
+    }
 
     // 1. Setup Cloudflare's Native Edge Cache
     const cacheUrl = new URL(request.url);
@@ -65,11 +69,15 @@ export async function onRequest(context) {
         });
 
         // 5. Store it in the cache in the background
-        context.waitUntil(cache.put(cacheKey, response.clone()));
+        waitUntil(cache.put(cacheKey, response.clone()));
         
         return response;
 
-    } catch (err) {
+    } catch {
         return new Response(JSON.stringify([]), { headers: { "Content-Type": "application/json" } });
     }
+}
+
+export async function onRequest(context) {
+    return handleArrivalsRequest(context.request, context.env, (promise) => context.waitUntil(promise));
 }
