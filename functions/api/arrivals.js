@@ -38,15 +38,9 @@ export async function onRequest(context) {
                 .replace(/\s+/g, " ")
                 .trim()
                 .replace(/(?:\s+STATION)+$/, "")
+                .replace(/\s+(?:N|S|E|W|NB|SB|EB|WB|NORTHBOUND|SOUTHBOUND|EASTBOUND|WESTBOUND|PLATFORM\s*\d+)$/, "")
                 .trim();
             return STATION_ALIASES[normalized] || normalized;
-        };
-        const matchesTargetStation = (stationName, targetStation) => {
-            if (!stationName || !targetStation) return false;
-            return stationName === targetStation ||
-                stationName.startsWith(`${targetStation} `) ||
-                stationName.startsWith(`${targetStation}-`) ||
-                stationName.startsWith(`${targetStation}/`);
         };
         const target = normalizeStationName(station);
         const results = [];
@@ -63,7 +57,7 @@ export async function onRequest(context) {
             if (!t) return;
             const rawStation = (t.STATION || t.Station || "").toUpperCase();
             const normalizedStation = normalizeStationName(rawStation);
-            if (matchesTargetStation(normalizedStation, target)) {
+            if (normalizedStation === target) {
                 results.push({
                     station: rawStation,
                     destination: cleanDest(t.DESTINATION || t.Destination),
