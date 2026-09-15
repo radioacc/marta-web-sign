@@ -299,6 +299,7 @@ main {
     padding: 16px 0 18px 64px;
     font-family: "Inter", "Helvetica Neue", Helvetica, Arial, sans-serif;
     font-variant-numeric: tabular-nums;
+    background: #ffffff;
 }
 
 .timeline-row {
@@ -307,17 +308,17 @@ main {
     align-items: center;
     min-height: 76px;
     padding: 0 20px 0 0;
-    border-bottom: 1px solid #242424;
-    color: #e6e6e6;
+    border-bottom: 1px solid #e6e6e6;
+    color: #1f1f1f;
     transition: color 0.25s ease, transform 0.25s ease;
 }
 
 .timeline-row.passed {
-    color: #b7b7b7;
+    color: #666666;
 }
 
 .timeline-row.focused {
-    color: #fff;
+    color: #0f0f0f;
     font-weight: 700;
     background: rgba(237, 28, 36, 0.08);
 }
@@ -356,7 +357,7 @@ main {
     height: 14px;
     border-radius: 50%;
     border: 2px solid #ed1c24;
-    background: #151515;
+    background: #ffffff;
 }
 
 .timeline-row.focused .timeline-dot {
@@ -382,6 +383,27 @@ main {
 
 .timeline-row.passed .timeline-eta {
     opacity: 0.6;
+}
+
+.dark-mode .train-timeline {
+    background: #151515;
+}
+
+.dark-mode .timeline-row {
+    border-bottom-color: #242424;
+    color: #e6e6e6;
+}
+
+.dark-mode .timeline-row.passed {
+    color: #b7b7b7;
+}
+
+.dark-mode .timeline-row.focused {
+    color: #ffffff;
+}
+
+.dark-mode .timeline-dot {
+    background: #151515;
 }
 
 .minutes-sub {
