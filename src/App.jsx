@@ -310,7 +310,7 @@ export default function App() {
     };
 
     const getTrainKey = (t, i) => {
-        if (t.train_id) return `id:${t.train_id}`;
+        if (t.train_id) return `id:${t.train_id}:${t.line || 'NA'}:${t.direction || 'NA'}:${t.destination || 'NA'}`;
         return `${t.line || 'NA'}-${t.direction || 'NA'}-${t.destination || 'NA'}-${i}`;
     };
 
