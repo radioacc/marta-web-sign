@@ -202,7 +202,6 @@ export default function App() {
     const activeTrainKey = trainView?.trainKey || null;
     const focusedTrainIndex = trainView?.focusIndex ?? null;
     const selectedTrainId = trainView?.trainId || null;
-    const selectedTrainAnchorIndex = trainView?.anchorIndex ?? null;
 
     useEffect(() => {
         if (!activeTrainKey) return;
@@ -246,10 +245,13 @@ export default function App() {
             if (!prev) return prev;
             if (prev.trainKey !== activeTrainKey) return prev;
             if (Math.abs(prev.etaToFocusSeconds - freshEta) < 20) return prev;
-            const anchorIndex = selectedTrainAnchorIndex ?? prev.anchorIndex;
-            return { ...prev, focusIndex: anchorIndex, etaToFocusSeconds: freshEta };
+            return { ...prev, etaToFocusSeconds: freshEta };
         });
-    }, [activeTrainKey, currentTrains, selectedTrainAnchorIndex, selectedTrainId]);
+    }, [activeTrainKey, currentTrains, selectedTrainId]);
+
+    useEffect(() => {
+        lastTimelineScrollRef.current = { index: null, at: 0 };
+    }, [activeTrainKey]);
 
     useEffect(() => {
         if (focusedTrainIndex == null) return;
