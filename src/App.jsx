@@ -204,6 +204,9 @@ export default function App() {
     const activeTrainKey = trainView?.trainKey || null;
     const focusedTrainIndex = trainView?.focusIndex ?? null;
     const selectedTrainId = trainView?.trainId || null;
+    const selectedTrainLine = trainView?.line || null;
+    const selectedTrainDirection = trainView?.direction || null;
+    const selectedTrainDestination = trainView?.destination || null;
 
     useEffect(() => {
         if (!activeTrainKey) return;
@@ -237,8 +240,11 @@ export default function App() {
 
         const matched = currentTrains.find((t, i) => {
             const key = getTrainKey(t, i);
-            if (selectedTrainId && t.train_id) return String(t.train_id) === String(selectedTrainId);
-            return key === activeTrainKey;
+            if (key === activeTrainKey) return true;
+            if (selectedTrainId && t.train_id && String(t.train_id) === String(selectedTrainId)) {
+                return t.line === selectedTrainLine && t.direction === selectedTrainDirection && t.destination === selectedTrainDestination;
+            }
+            return false;
         });
         if (!matched) {
             setTrainView(prev => (prev?.trainKey === activeTrainKey ? null : prev));
@@ -252,7 +258,7 @@ export default function App() {
             if (Math.abs(prev.etaToFocusSeconds - freshEta) < 20) return prev;
             return { ...prev, etaToFocusSeconds: freshEta };
         });
-    }, [activeTrainKey, currentTrains, selectedTrainId]);
+    }, [activeTrainKey, currentTrains, selectedTrainDestination, selectedTrainDirection, selectedTrainId, selectedTrainLine]);
 
     useEffect(() => {
         lastTimelineScrollRef.current = { index: null, at: 0 };
@@ -309,9 +315,9 @@ export default function App() {
         return str.toLowerCase().replace(/(?:^|[\s-])\w/g, match => match.toUpperCase());
     };
 
-    const getTrainKey = (t, i) => {
+    const getTrainKey = (t) => {
         if (t.train_id) return `id:${t.train_id}:${t.line || 'NA'}:${t.direction || 'NA'}:${t.destination || 'NA'}`;
-        return `${t.line || 'NA'}-${t.direction || 'NA'}-${t.destination || 'NA'}-${i}`;
+        return `${t.line || 'NA'}-${t.direction || 'NA'}-${t.destination || 'NA'}-${normalizeStation(t.station) || 'NA'}`;
     };
 
     const getRouteForTrain = (line, direction) => {
@@ -448,7 +454,7 @@ export default function App() {
             </header>
 
             {trainView ? (
-                <main className="train-timeline">
+                <main className="train-timeline" tabIndex={0} aria-label="Train route timeline">
                     {trainView.routeStations.map((station, index) => {
                         const eta = getStationEta(trainView, index);
                         const isPassed = index < trainView.focusIndex;
