@@ -42,6 +42,8 @@ header {
 
 .train-view-header {
     border-bottom: 2px solid #ed1c24;
+    justify-content: flex-start;
+    gap: 12px;
 }
 
 .dark-mode header {
@@ -86,10 +88,6 @@ header {
     align-items: center;
 }
 
-.controls.placeholder {
-    visibility: hidden;
-}
-
 .back-btn {
     background: transparent;
     border: none;
@@ -102,6 +100,7 @@ header {
 
 .train-header-main {
     flex-grow: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 4px;
@@ -189,6 +188,11 @@ main {
     padding-bottom: 15px;
     height: 80px;
     cursor: pointer;
+    width: 100%;
+    border: none;
+    background: transparent;
+    color: inherit;
+    text-align: left;
 }
 
 .dark-mode .train-row {

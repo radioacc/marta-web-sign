@@ -241,7 +241,7 @@ export default function App() {
         setTrainView(prev => {
             if (!prev) return prev;
             if (Math.abs(prev.etaToFocusSeconds - freshEta) < 20) return prev;
-            return { ...prev, etaToFocusSeconds: freshEta };
+            return { ...prev, focusIndex: prev.anchorIndex, etaToFocusSeconds: freshEta };
         });
     }, [currentTrains, trainView]);
 
@@ -321,6 +321,7 @@ export default function App() {
             line: train.line,
             direction: train.direction,
             routeStations,
+            anchorIndex: focusIndex,
             focusIndex,
             etaToFocusSeconds: parseWaitingSeconds(train.waiting_seconds),
             travelStep: 1
@@ -375,14 +376,20 @@ export default function App() {
         else { mainTime = mainTime.replace(' min', ''); }
 
         return (
-            <div key={getTrainKey(t, i)} className="train-row status-real" onClick={() => openTrainView(t, i)}>
+            <button
+                key={getTrainKey(t, i)}
+                type="button"
+                className="train-row status-real"
+                onClick={() => openTrainView(t, i)}
+                aria-label={`Open Train view for ${t.destination} ${t.direction || ''}`.trim()}
+            >
                 <div className={`line-bubble ${t.line}`}>{t.direction}</div>
                 <div className="train-info"><div className="destination">{t.destination}</div></div>
                 <div className="minutes-box">
                     <div className="minutes-main">{mainTime}</div>
                     <div className="minutes-sub">{subLabel}</div>
                 </div>
-            </div>
+            </button>
         );
     };
 
@@ -404,7 +411,6 @@ export default function App() {
                                 <small>{trainIdLabel}</small>
                             </div>
                         </div>
-                        <div className="controls placeholder" />
                     </>
                 ) : (
                     <>
