@@ -238,7 +238,10 @@ export default function App() {
             if (selectedTrainId && t.train_id) return String(t.train_id) === String(selectedTrainId);
             return key === activeTrainKey;
         });
-        if (!matched) return;
+        if (!matched) {
+            setTrainView(prev => (prev?.trainKey === activeTrainKey ? null : prev));
+            return;
+        }
 
         const freshEta = parseWaitingSeconds(matched.waiting_seconds);
         setTrainView(prev => {
@@ -285,12 +288,14 @@ export default function App() {
                 const d = getDist(position.coords.latitude, position.coords.longitude, coords.lat, coords.lon);
                 if (d < minDist) { minDist = d; nearest = station; }
             }
-            if (nearest && nearest !== currentStation) {
+            if (!nearest) return;
+            setCurrentStation(prev => {
+                if (prev === nearest) return prev;
                 showToast(`📍 Found nearest: ${titleCase(nearest)}`);
-                setCurrentStation(nearest);
-            }
+                return nearest;
+            });
         });
-    }, [locationOverridden, currentStation]);
+    }, [locationOverridden]);
 
     const showToast = (msg) => {
         setToastMsg(msg);
@@ -414,7 +419,7 @@ export default function App() {
             <header className={trainView ? "train-view-header" : ""}>
                 {trainView ? (
                     <>
-                        <button className="back-btn" onClick={closeTrainView}>←</button>
+                        <button className="back-btn" onClick={closeTrainView} aria-label="Close Train view">←</button>
                         <div className="train-header-main">
                             <div className="train-destination">{trainHeaderTitle}</div>
                             <div className="train-meta">
