@@ -116,6 +116,7 @@ export default function App() {
             const response = await fetch(`/api/arrivals?station=${currentStation}`);
             if (!response.ok) throw new Error("Network response was not ok");
             const data = await response.json();
+            if (requestId !== latestRequestIdRef.current) return;
 
             if (Array.isArray(data) && data.length > 0) {
                 // Only update the specific station we are looking at
@@ -127,7 +128,9 @@ export default function App() {
             }
         } catch (err) {
             console.error("Fetch error or disconnect", err);
-            setError(true);
+            if (requestId === latestRequestIdRef.current) {
+                setError(true);
+            }
         } finally {
             if (requestId === latestRequestIdRef.current) {
                 setIsLoading(false);
