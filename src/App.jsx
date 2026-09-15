@@ -449,7 +449,6 @@ export default function App() {
 
             {trainView ? (
                 <main className="train-timeline">
-                    <div className="timeline-line" />
                     {trainView.routeStations.map((station, index) => {
                         const eta = getStationEta(trainView, index);
                         const isPassed = index < trainView.focusIndex;
