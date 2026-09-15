@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
 
 const STATION_LIST = [
@@ -88,6 +88,7 @@ export default function App() {
     const [isSplitScreen, setIsSplitScreen] = useState(() => {
         return localStorage.getItem('marta_split_screen') === 'true';
     });
+    const latestRequestIdRef = useRef(0);
 
     useEffect(() => {
         if (isDarkMode) document.body.classList.add('dark-mode');
@@ -105,6 +106,7 @@ export default function App() {
 
     // --- 2. IRONCLAD FETCH LOGIC (Now writes directly to the Omni-Cache) ---
     const fetchTrains = useCallback(async () => {
+        const requestId = ++latestRequestIdRef.current;
         setIsLoading(true);
         try {
             const response = await fetch(`/api/arrivals?station=${currentStation}`);
@@ -123,7 +125,9 @@ export default function App() {
             console.error("Fetch error or disconnect", err);
             setError(true);
         } finally {
-            setIsLoading(false);
+            if (requestId === latestRequestIdRef.current) {
+                setIsLoading(false);
+            }
         }
     }, [currentStation]);
 
@@ -279,7 +283,7 @@ export default function App() {
                         <div className="split-panel-header">NORTHBOUND</div>
                         <div className="split-panel-body">
                             {isLoading && northboundTrains.length === 0
-                                ? emptyState("Fetching schedule...")
+                                ? emptyState("Loading...")
                                 : error && northboundTrains.length === 0
                                     ? emptyState("Connection Error")
                                     : northboundTrains.length === 0 && !isLoading
@@ -293,7 +297,7 @@ export default function App() {
                         <div className="split-panel-header">SOUTHBOUND</div>
                         <div className="split-panel-body">
                             {isLoading && southboundTrains.length === 0
-                                ? emptyState("Fetching schedule...")
+                                ? emptyState("Loading...")
                                 : error && southboundTrains.length === 0
                                     ? emptyState("Connection Error")
                                     : southboundTrains.length === 0 && !isLoading
@@ -306,7 +310,7 @@ export default function App() {
             ) : (
                 <main style={{ transition: 'opacity 0.3s', opacity: isLoading && currentTrains.length > 0 ? 0.6 : 1 }}>
                     {isLoading && currentTrains.length === 0 ? (
-                        emptyState("Fetching schedule...")
+                        emptyState("Loading...")
                     ) : error && currentTrains.length === 0 ? (
                         emptyState("Connection Error")
                     ) : currentTrains.length === 0 && !isLoading ? (

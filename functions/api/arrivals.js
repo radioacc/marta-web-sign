@@ -27,7 +27,14 @@ export async function onRequest(context) {
         if (data && data.Trains) data = data.Trains;
         if (!Array.isArray(data)) data = [data];
 
-        const target = station.toUpperCase().replace(" STATION", "");
+        const normalizeStationName = (value) => {
+            if (!value) return "";
+            const normalized = String(value).toUpperCase().replace(" STATION", "").trim();
+            if (normalized === "SEC DISTRICT") return "OMNI";
+            if (normalized === "GOLD DOME") return "GEORGIA STATE";
+            return normalized;
+        };
+        const target = normalizeStationName(station);
         const results = [];
 
         const cleanDest = (text) => {
@@ -40,7 +47,7 @@ export async function onRequest(context) {
 
         data.forEach(t => {
             if (!t) return;
-            const tStation = (t.STATION || t.Station || "").toUpperCase();
+            const tStation = normalizeStationName(t.STATION || t.Station || "");
             if (tStation.includes(target)) {
                 results.push({
                     station: tStation,
