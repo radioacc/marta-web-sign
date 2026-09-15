@@ -54,6 +54,8 @@ const STATION_COORDS = {
     "WEST LAKE": { lat: 33.7531, lon: -84.4461 }
 };
 
+const MIN_WAIT_SECONDS = 15;
+const ARRIVING_THRESHOLD_SECONDS = 30;
 const TRAIN_STEP_SECONDS = 120;
 
 const TRAIN_ROUTES = {
@@ -67,8 +69,8 @@ const normalizeStation = (station) => String(station || "").toUpperCase().replac
 
 const parseWaitingSeconds = (value) => {
     const secs = parseInt(value, 10);
-    if (Number.isNaN(secs)) return 30;
-    return Math.max(secs, 15);
+    if (Number.isNaN(secs)) return ARRIVING_THRESHOLD_SECONDS;
+    return Math.max(secs, MIN_WAIT_SECONDS);
 };
 
 export default function App() {
@@ -231,7 +233,7 @@ export default function App() {
     }, [activeTrainKey]);
 
     useEffect(() => {
-        if (!activeTrainKey || currentTrains.length === 0) return;
+        if (!activeTrainKey) return;
 
         const matched = currentTrains.find((t, i) => {
             const key = getTrainKey(t, i);
@@ -356,7 +358,7 @@ export default function App() {
 
     const formatTrainEta = (seconds) => {
         if (seconds == null) return "";
-        if (seconds <= 30) return "Arriving";
+        if (seconds <= ARRIVING_THRESHOLD_SECONDS) return "Arriving";
         return `${Math.ceil(seconds / 60)} min`;
     };
 
