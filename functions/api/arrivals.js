@@ -33,7 +33,12 @@ export async function onRequest(context) {
         };
         const normalizeStationName = (value) => {
             if (!value) return "";
-            const normalized = String(value).toUpperCase().replace(" STATION", "").trim();
+            const normalized = String(value)
+                .toUpperCase()
+                .replace(/\s+/g, " ")
+                .trim()
+                .replace(/(?:\s+STATION)+$/, "")
+                .trim();
             return STATION_ALIASES[normalized] || normalized;
         };
         const target = normalizeStationName(station);

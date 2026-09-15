@@ -93,6 +93,7 @@ export default function App() {
         return localStorage.getItem('marta_split_screen') === 'true';
     });
     const latestRequestIdRef = useRef(0);
+    const activeRequestControllerRef = useRef(null);
 
     useEffect(() => {
         if (isDarkMode) document.body.classList.add('dark-mode');
@@ -110,10 +111,15 @@ export default function App() {
 
     // --- 2. IRONCLAD FETCH LOGIC (Now writes directly to the Omni-Cache) ---
     const fetchTrains = useCallback(async () => {
+        if (activeRequestControllerRef.current) {
+            activeRequestControllerRef.current.abort();
+        }
+        const controller = new AbortController();
+        activeRequestControllerRef.current = controller;
         const requestId = ++latestRequestIdRef.current;
         setIsLoading(true);
         try {
-            const response = await fetch(`/api/arrivals?station=${currentStation}`);
+            const response = await fetch(`/api/arrivals?station=${currentStation}`, { signal: controller.signal });
             if (!response.ok) throw new Error("Network response was not ok");
             const data = await response.json();
             if (requestId !== latestRequestIdRef.current) return;
@@ -127,16 +133,28 @@ export default function App() {
                 console.warn("MARTA sent empty data. Ignoring glitch to prevent blank screen.");
             }
         } catch (err) {
+            if (err?.name === "AbortError") return;
             console.error("Fetch error or disconnect", err);
             if (requestId === latestRequestIdRef.current) {
                 setError(true);
             }
         } finally {
             if (requestId === latestRequestIdRef.current) {
+                if (activeRequestControllerRef.current === controller) {
+                    activeRequestControllerRef.current = null;
+                }
                 setIsLoading(false);
             }
         }
     }, [currentStation]);
+
+    useEffect(() => {
+        return () => {
+            if (activeRequestControllerRef.current) {
+                activeRequestControllerRef.current.abort();
+            }
+        };
+    }, []);
 
     // --- 3. UNIVERSAL OFFLINE TICKER (Ticks all stations simultaneously) ---
     useEffect(() => {
