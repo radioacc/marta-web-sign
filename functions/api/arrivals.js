@@ -61,10 +61,11 @@ export async function onRequest(context) {
 
         data.forEach(t => {
             if (!t) return;
-            const tStation = normalizeStationName(t.STATION || t.Station || "");
-            if (matchesTargetStation(tStation, target)) {
+            const rawStation = (t.STATION || t.Station || "").toUpperCase();
+            const normalizedStation = normalizeStationName(rawStation);
+            if (matchesTargetStation(normalizedStation, target)) {
                 results.push({
-                    station: tStation,
+                    station: rawStation,
                     destination: cleanDest(t.DESTINATION || t.Destination),
                     line: t.LINE || t.Line,
                     direction: t.DIRECTION || t.Direction,
