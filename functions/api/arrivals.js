@@ -27,12 +27,14 @@ export async function onRequest(context) {
         if (data && data.Trains) data = data.Trains;
         if (!Array.isArray(data)) data = [data];
 
+        const STATION_ALIASES = {
+            "SEC DISTRICT": "OMNI",
+            "GOLD DOME": "GEORGIA STATE"
+        };
         const normalizeStationName = (value) => {
             if (!value) return "";
             const normalized = String(value).toUpperCase().replace(" STATION", "").trim();
-            if (normalized === "SEC DISTRICT") return "OMNI";
-            if (normalized === "GOLD DOME") return "GEORGIA STATE";
-            return normalized;
+            return STATION_ALIASES[normalized] || normalized;
         };
         const target = normalizeStationName(station);
         const results = [];
