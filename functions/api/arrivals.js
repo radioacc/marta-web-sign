@@ -50,7 +50,7 @@ export async function onRequest(context) {
         data.forEach(t => {
             if (!t) return;
             const tStation = normalizeStationName(t.STATION || t.Station || "");
-            if (tStation.includes(target)) {
+            if (tStation === target) {
                 results.push({
                     station: tStation,
                     destination: cleanDest(t.DESTINATION || t.Destination),
