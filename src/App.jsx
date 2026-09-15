@@ -201,6 +201,8 @@ export default function App() {
 
     const activeTrainKey = trainView?.trainKey || null;
     const focusedTrainIndex = trainView?.focusIndex ?? null;
+    const selectedTrainId = trainView?.trainId || null;
+    const selectedTrainAnchorIndex = trainView?.anchorIndex ?? null;
 
     useEffect(() => {
         if (!activeTrainKey) return;
@@ -210,13 +212,14 @@ export default function App() {
                 if (!prev) return prev;
                 let nextEta = prev.etaToFocusSeconds - 1;
                 let nextFocus = prev.focusIndex;
+                const step = prev.travelStep > 0 ? prev.travelStep : 1;
 
                 while (nextEta <= 0) {
                     if (nextFocus >= prev.routeStations.length - 1) {
                         nextEta = 0;
                         break;
                     }
-                    nextFocus += prev.travelStep;
+                    nextFocus += step;
                     nextEta += TRAIN_STEP_SECONDS;
                 }
 
@@ -229,22 +232,24 @@ export default function App() {
     }, [activeTrainKey]);
 
     useEffect(() => {
-        if (!trainView || currentTrains.length === 0) return;
+        if (!activeTrainKey || currentTrains.length === 0) return;
 
         const matched = currentTrains.find((t, i) => {
             const key = getTrainKey(t, i);
-            if (trainView.trainId && t.train_id) return String(t.train_id) === String(trainView.trainId);
-            return key === trainView.trainKey;
+            if (selectedTrainId && t.train_id) return String(t.train_id) === String(selectedTrainId);
+            return key === activeTrainKey;
         });
         if (!matched) return;
 
         const freshEta = parseWaitingSeconds(matched.waiting_seconds);
         setTrainView(prev => {
             if (!prev) return prev;
+            if (prev.trainKey !== activeTrainKey) return prev;
             if (Math.abs(prev.etaToFocusSeconds - freshEta) < 20) return prev;
-            return { ...prev, focusIndex: prev.anchorIndex, etaToFocusSeconds: freshEta };
+            const anchorIndex = selectedTrainAnchorIndex ?? prev.anchorIndex;
+            return { ...prev, focusIndex: anchorIndex, etaToFocusSeconds: freshEta };
         });
-    }, [currentTrains, trainView]);
+    }, [activeTrainKey, currentTrains, selectedTrainAnchorIndex, selectedTrainId]);
 
     useEffect(() => {
         if (focusedTrainIndex == null) return;
