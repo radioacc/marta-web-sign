@@ -41,6 +41,13 @@ export async function onRequest(context) {
                 .trim();
             return STATION_ALIASES[normalized] || normalized;
         };
+        const matchesTargetStation = (stationName, targetStation) => {
+            if (!stationName || !targetStation) return false;
+            return stationName === targetStation ||
+                stationName.startsWith(`${targetStation} `) ||
+                stationName.startsWith(`${targetStation}-`) ||
+                stationName.startsWith(`${targetStation}/`);
+        };
         const target = normalizeStationName(station);
         const results = [];
 
@@ -55,7 +62,7 @@ export async function onRequest(context) {
         data.forEach(t => {
             if (!t) return;
             const tStation = normalizeStationName(t.STATION || t.Station || "");
-            if (tStation === target) {
+            if (matchesTargetStation(tStation, target)) {
                 results.push({
                     station: tStation,
                     destination: cleanDest(t.DESTINATION || t.Destination),
