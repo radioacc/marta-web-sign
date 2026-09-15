@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import './App.css';
 
 const STATION_LIST = [
@@ -82,7 +82,11 @@ export default function App() {
         STATION_LIST.forEach(s => {
             const saved = localStorage.getItem(`marta_backup_${s}`);
             if (saved) {
-                try { initialCache[s] = JSON.parse(saved); } catch (e) { }
+                try {
+                    initialCache[s] = JSON.parse(saved);
+                } catch {
+                    localStorage.removeItem(`marta_backup_${s}`);
+                }
             }
         });
         return initialCache;
@@ -107,7 +111,7 @@ export default function App() {
     });
     const [trainView, setTrainView] = useState(null);
     const stationItemRefs = useRef({});
-    const currentTrains = trainCache[currentStation] || [];
+    const currentTrains = useMemo(() => trainCache[currentStation] || [], [trainCache, currentStation]);
 
     useEffect(() => {
         if (isDarkMode) document.body.classList.add('dark-mode');
@@ -194,8 +198,11 @@ export default function App() {
         return () => clearInterval(interval);
     }, [fetchTrains]);
 
+    const activeTrainKey = trainView?.trainKey || null;
+    const focusedTrainIndex = trainView?.focusIndex ?? null;
+
     useEffect(() => {
-        if (!trainView) return;
+        if (!activeTrainKey) return;
 
         const ticker = setInterval(() => {
             setTrainView(prev => {
@@ -218,7 +225,7 @@ export default function App() {
         }, 1000);
 
         return () => clearInterval(ticker);
-    }, [trainView?.trainKey]);
+    }, [activeTrainKey]);
 
     useEffect(() => {
         if (!trainView || currentTrains.length === 0) return;
@@ -239,12 +246,12 @@ export default function App() {
     }, [currentTrains, trainView]);
 
     useEffect(() => {
-        if (!trainView) return;
-        const focusedEl = stationItemRefs.current[trainView.focusIndex];
+        if (focusedTrainIndex == null) return;
+        const focusedEl = stationItemRefs.current[focusedTrainIndex];
         if (focusedEl && focusedEl.scrollIntoView) {
             focusedEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
-    }, [trainView?.focusIndex]);
+    }, [focusedTrainIndex]);
 
     // Geolocation
     useEffect(() => {
@@ -271,7 +278,7 @@ export default function App() {
                 setCurrentStation(nearest);
             }
         });
-    }, [locationOverridden]);
+    }, [locationOverridden, currentStation]);
 
     const showToast = (msg) => {
         setToastMsg(msg);
