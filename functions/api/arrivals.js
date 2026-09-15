@@ -33,13 +33,14 @@ export async function onRequest(context) {
         };
         const normalizeStationName = (value) => {
             if (!value) return "";
-            const normalized = String(value)
+            let normalized = String(value)
                 .toUpperCase()
                 .replace(/\s+/g, " ")
-                .trim()
-                .replace(/(?:\s+STATION)+$/, "")
-                .replace(/\s+(?:N|S|E|W|NB|SB|EB|WB|NORTHBOUND|SOUTHBOUND|EASTBOUND|WESTBOUND|PLATFORM\s*\d+)$/, "")
                 .trim();
+            const trailingQualifier = /\s+(?:N|S|E|W|NB|SB|EB|WB|NORTHBOUND|SOUTHBOUND|EASTBOUND|WESTBOUND|PLATFORM\s*\d+|STATION)$/;
+            while (trailingQualifier.test(normalized)) {
+                normalized = normalized.replace(trailingQualifier, "").trim();
+            }
             return STATION_ALIASES[normalized] || normalized;
         };
         const target = normalizeStationName(station);
