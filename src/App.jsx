@@ -462,7 +462,7 @@ export default function App() {
                         const rowClass = `timeline-row${isPassed ? ' passed' : ''}${isFocused ? ' focused' : ''}`;
                         return (
                             <div
-                                key={station}
+                                key={`${station}-${index}`}
                                 className={rowClass}
                                 ref={(node) => { stationItemRefs.current[index] = node; }}
                                 aria-current={isFocused ? "step" : undefined}
