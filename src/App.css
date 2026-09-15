@@ -98,6 +98,12 @@ header {
     text-align: left;
 }
 
+.back-btn:focus-visible {
+    outline: 2px solid #fff;
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
 .train-header-main {
     flex-grow: 1;
     min-width: 0;
@@ -193,6 +199,12 @@ main {
     background: transparent;
     color: inherit;
     text-align: left;
+}
+
+.train-row:focus-visible {
+    outline: 2px solid #ed1c24;
+    outline-offset: 4px;
+    border-radius: 8px;
 }
 
 .dark-mode .train-row {

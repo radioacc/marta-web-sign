@@ -111,6 +111,7 @@ export default function App() {
     });
     const [trainView, setTrainView] = useState(null);
     const stationItemRefs = useRef({});
+    const lastTimelineScrollRef = useRef({ index: null, at: 0 });
     const currentTrains = useMemo(() => trainCache[currentStation] || [], [trainCache, currentStation]);
 
     useEffect(() => {
@@ -247,10 +248,14 @@ export default function App() {
 
     useEffect(() => {
         if (focusedTrainIndex == null) return;
+        const prevIndex = lastTimelineScrollRef.current.index;
+        const elapsedSinceLast = Date.now() - lastTimelineScrollRef.current.at;
+        const behavior = prevIndex == null || elapsedSinceLast < 1000 ? 'auto' : 'smooth';
         const focusedEl = stationItemRefs.current[focusedTrainIndex];
         if (focusedEl && focusedEl.scrollIntoView) {
-            focusedEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            focusedEl.scrollIntoView({ behavior, block: 'center' });
         }
+        lastTimelineScrollRef.current = { index: focusedTrainIndex, at: Date.now() };
     }, [focusedTrainIndex]);
 
     // Geolocation
@@ -441,6 +446,8 @@ export default function App() {
                                 key={station}
                                 className={rowClass}
                                 ref={(node) => { stationItemRefs.current[index] = node; }}
+                                aria-current={isFocused ? "step" : undefined}
+                                aria-label={`${titleCase(station)}${isFocused ? " current stop" : ""}${eta == null ? "" : `, ${formatTrainEta(eta)}`}`}
                             >
                                 <div className="timeline-dot" />
                                 <div className="timeline-station">{titleCase(station)}</div>
