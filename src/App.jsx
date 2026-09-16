@@ -358,9 +358,9 @@ export default function App() {
             return;
         }
 
-        const preferredStation = normalizeStation(currentStation);
-        const fallbackStation = normalizeStation(train.station);
-        let focusIndex = routeStations.indexOf(preferredStation);
+        const stationFromTrain = normalizeStation(train.station);
+        const fallbackStation = normalizeStation(currentStation);
+        let focusIndex = routeStations.indexOf(stationFromTrain);
         if (focusIndex < 0) focusIndex = routeStations.indexOf(fallbackStation);
         if (focusIndex < 0) focusIndex = 0;
 
@@ -387,8 +387,8 @@ export default function App() {
         const currentIndex = getFocusedIndexForView(viewState);
         if (currentIndex == null) return null;
         if (stationIndex < currentIndex) return -1;
-        const baseEtaAtCurrent = viewState.etaToFocusSeconds - (viewState.anchorIndex - currentIndex) * TRAIN_STEP_SECONDS;
-        return baseEtaAtCurrent + (stationIndex - currentIndex) * TRAIN_STEP_SECONDS;
+        const rawEta = viewState.etaToFocusSeconds + (stationIndex - viewState.anchorIndex) * TRAIN_STEP_SECONDS;
+        return Math.max(0, rawEta);
     };
 
     const formatTrainEta = (seconds) => {
