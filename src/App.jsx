@@ -65,7 +65,7 @@ export default function App() {
         STATION_LIST.forEach(s => {
             const saved = localStorage.getItem(`marta_backup_${s}`);
             if (saved) {
-                try { initialCache[s] = JSON.parse(saved); } catch (e) { }
+                try { initialCache[s] = JSON.parse(saved); } catch { }
             }
         });
         return initialCache;
@@ -199,7 +199,7 @@ export default function App() {
                 setCurrentStation(nearest);
             }
         });
-    }, [locationOverridden]);
+    }, [locationOverridden, currentStation]);
 
     const showToast = (msg) => {
         setToastMsg(msg);
