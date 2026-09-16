@@ -193,7 +193,7 @@ main {
 }
 
 .destination {
-    font-size: 2.8rem;
+    font-size: clamp(1.4rem, 4.2vw, 2.8rem);
     font-weight: 700;
     white-space: nowrap;
     overflow: hidden;
@@ -212,7 +212,7 @@ main {
 }
 
 .minutes-main {
-    font-size: 2.8rem;
+    font-size: clamp(1.4rem, 4.2vw, 2.8rem);
     font-weight: 700;
     line-height: 1;
 }
@@ -404,6 +404,19 @@ main {
     min-height: 0;
 }
 
+.split-screen-active .destination {
+    font-size: clamp(0.95rem, 2.2vw, 1.5rem);
+    letter-spacing: -0.2px;
+}
+
+.split-screen-active .minutes-main {
+    font-size: clamp(1.05rem, 2.4vw, 1.8rem);
+}
+
+.split-screen-active .minutes-box {
+    min-width: clamp(56px, 8vw, 90px);
+}
+
 .split-divider {
     width: 1px;
     background-color: #eee;
@@ -416,20 +429,31 @@ main {
 
 #split-toggle {
     position: fixed;
-    bottom: 15px;
-    left: 15px;
-    width: 24px;
-    height: 24px;
-    background: transparent;
-    border: none;
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    left: calc(12px + env(safe-area-inset-left, 0px));
+    width: 40px;
+    height: 40px;
+    background: rgba(0, 0, 0, 0.08);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 999px;
     font-size: 1.1rem;
     line-height: 1;
     padding: 0;
     opacity: 0.2;
     cursor: pointer;
-    z-index: 200;
+    z-index: 260;
     transition: opacity 0.3s;
     color: inherit;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+.dark-mode #split-toggle {
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.12);
 }
 
     #split-toggle:hover,
@@ -475,10 +499,22 @@ button.nav-btn-active {
     }
 
     .destination, .minutes-main {
-        font-size: 1.6rem;
+        font-size: clamp(1.1rem, 5.2vw, 1.6rem);
     }
 
     .minutes-box {
         min-width: 70px;
+    }
+
+    .split-screen-active .destination {
+        font-size: clamp(0.85rem, 3.4vw, 1.15rem);
+    }
+
+    .split-screen-active .minutes-main {
+        font-size: clamp(0.95rem, 3.6vw, 1.3rem);
+    }
+
+    .split-screen-active .minutes-box {
+        min-width: 52px;
     }
 }
