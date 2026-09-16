@@ -264,7 +264,7 @@ export default function App() {
         setTrainView(prev => {
             if (!prev) return prev;
             if (prev.trainKey !== activeTrainKey) return prev;
-            if (Math.abs(prev.etaToFocusSeconds - freshEta) < 20) return prev;
+            if (prev.etaToFocusSeconds === freshEta) return prev;
             return { ...prev, etaToFocusSeconds: freshEta };
         });
     }, [activeTrainKey, currentTrains, selectedTrainDestination, selectedTrainDirection, selectedTrainIdentityKey, selectedTrainIdentityRank, selectedTrainId, selectedTrainLine]);
@@ -324,9 +324,9 @@ export default function App() {
         return str.toLowerCase().replace(/(?:^|[\s-])\w/g, match => match.toUpperCase());
     };
 
-    const getTrainKey = (t) => {
+    const getTrainKey = (t, i = -1) => {
         if (t.train_id) return `id:${t.train_id}:${t.line || 'NA'}:${t.direction || 'NA'}:${t.destination || 'NA'}`;
-        return `${t.line || 'NA'}-${t.direction || 'NA'}-${t.destination || 'NA'}-${normalizeStation(t.station) || 'NA'}`;
+        return `${t.line || 'NA'}-${t.direction || 'NA'}-${t.destination || 'NA'}-${normalizeStation(t.station) || 'NA'}-${i}`;
     };
 
     const getRouteForTrain = (line, direction) => {
