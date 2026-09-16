@@ -207,13 +207,19 @@ export default function App() {
     }, [fetchTrains]);
 
     const activeTrainKey = trainView?.trainKey || null;
-    const focusedTrainIndex = trainView?.focusIndex ?? null;
     const selectedTrainId = trainView?.trainId || null;
     const selectedTrainLine = trainView?.line || null;
     const selectedTrainDirection = trainView?.direction || null;
     const selectedTrainDestination = trainView?.destination || null;
     const selectedTrainIdentityKey = trainView?.trainIdentityKey || null;
     const selectedTrainIdentityRank = trainView?.trainIdentityRank ?? 0;
+    const focusedTrainIndex = useMemo(() => {
+        if (!trainView) return null;
+        const step = TRAIN_STEP_SECONDS > 0 ? TRAIN_STEP_SECONDS : 1;
+        const stopsAway = Math.max(0, Math.ceil(trainView.etaToFocusSeconds / step));
+        const index = trainView.anchorIndex - stopsAway;
+        return Math.max(0, Math.min(trainView.routeStations.length - 1, index));
+    }, [trainView]);
 
     useEffect(() => {
         if (!activeTrainKey) return;
@@ -223,21 +229,9 @@ export default function App() {
             setTrainView(prev => {
                 if (!prev) return prev;
                 if (prev.trainKey !== effectTrainKey) return prev;
-                let nextEta = prev.etaToFocusSeconds - 1;
-                let nextFocus = prev.focusIndex;
-                const step = prev.travelStep > 0 ? prev.travelStep : 1;
-
-                while (nextEta <= 0) {
-                    if (nextFocus >= prev.routeStations.length - 1) {
-                        nextEta = 0;
-                        break;
-                    }
-                    nextFocus += step;
-                    nextEta += TRAIN_STEP_SECONDS;
-                }
-
-                if (nextEta === prev.etaToFocusSeconds && nextFocus === prev.focusIndex) return prev;
-                return { ...prev, etaToFocusSeconds: nextEta, focusIndex: nextFocus };
+                const nextEta = Math.max(0, prev.etaToFocusSeconds - 1);
+                if (nextEta === prev.etaToFocusSeconds) return prev;
+                return { ...prev, etaToFocusSeconds: nextEta };
             });
         }, 1000);
 
@@ -366,9 +360,7 @@ export default function App() {
                 .filter(item => getTrainIdentityKey(item) === getTrainIdentityKey(train)).length,
             routeStations,
             anchorIndex: focusIndex,
-            focusIndex,
-            etaToFocusSeconds: parseWaitingSeconds(train.waiting_seconds),
-            travelStep: 1
+            etaToFocusSeconds: parseWaitingSeconds(train.waiting_seconds)
         });
     };
 
@@ -376,9 +368,8 @@ export default function App() {
 
     const getStationEta = (viewState, stationIndex) => {
         if (!viewState) return null;
-        if (stationIndex < viewState.focusIndex) return null;
-        const stopDiff = stationIndex - viewState.focusIndex;
-        return Math.max(0, viewState.etaToFocusSeconds + stopDiff * TRAIN_STEP_SECONDS);
+        const stopDiff = stationIndex - viewState.anchorIndex;
+        return viewState.etaToFocusSeconds + stopDiff * TRAIN_STEP_SECONDS;
     };
 
     const formatTrainEta = (seconds) => {
@@ -476,8 +467,8 @@ export default function App() {
                 <main className="train-timeline" tabIndex={0} aria-label="Train route timeline">
                     {trainView.routeStations.map((station, index) => {
                         const eta = getStationEta(trainView, index);
-                        const isPassed = index < trainView.focusIndex;
-                        const isFocused = index === trainView.focusIndex;
+                        const isPassed = focusedTrainIndex != null ? index < focusedTrainIndex : false;
+                        const isFocused = focusedTrainIndex != null ? index === focusedTrainIndex : false;
                         const rowClass = `timeline-row${isPassed ? ' passed' : ''}${isFocused ? ' focused' : ''}`;
                         return (
                             <div
@@ -485,7 +476,7 @@ export default function App() {
                                 className={rowClass}
                                 ref={(node) => { stationItemRefs.current[index] = node; }}
                                 aria-current={isFocused ? "step" : undefined}
-                                aria-label={`${titleCase(station)}${isFocused ? " current stop" : ""}${eta == null ? "" : `, ${formatTrainEta(eta)}`}`}
+                                aria-label={`${titleCase(station)}${isFocused ? " current stop" : ""}${isPassed ? ", passed" : eta == null ? "" : `, ${formatTrainEta(eta)}`}`}
                             >
                                 <div className="timeline-dot" />
                                 <div className="timeline-station">{titleCase(station)}</div>
