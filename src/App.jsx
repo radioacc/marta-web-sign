@@ -78,6 +78,14 @@ const getTrainIdentityKey = (t) => {
     return `${t.train_id}:${t.line || 'NA'}:${t.direction || 'NA'}`;
 };
 
+const getFocusedIndexForView = (viewState) => {
+    if (!viewState) return null;
+    const step = TRAIN_STEP_SECONDS > 0 ? TRAIN_STEP_SECONDS : 1;
+    const stopsAway = Math.max(0, Math.floor(viewState.etaToFocusSeconds / step));
+    const index = viewState.anchorIndex - stopsAway;
+    return Math.max(0, Math.min(viewState.routeStations.length - 1, index));
+};
+
 export default function App() {
     const [currentStation, setCurrentStation] = useState(() => {
         return localStorage.getItem('marta_user_station') || "MIDTOWN";
@@ -209,13 +217,7 @@ export default function App() {
     const activeTrainKey = trainView?.trainKey || null;
     const selectedTrainIdentityKey = trainView?.trainIdentityKey || null;
     const selectedTrainIdentityRank = trainView?.trainIdentityRank ?? 0;
-    const focusedTrainIndex = useMemo(() => {
-        if (!trainView) return null;
-        const step = TRAIN_STEP_SECONDS > 0 ? TRAIN_STEP_SECONDS : 1;
-        const stopsAway = Math.max(0, Math.ceil(trainView.etaToFocusSeconds / step));
-        const index = trainView.anchorIndex - stopsAway;
-        return Math.max(0, Math.min(trainView.routeStations.length - 1, index));
-    }, [trainView]);
+    const focusedTrainIndex = useMemo(() => getFocusedIndexForView(trainView), [trainView]);
 
     useEffect(() => {
         if (!activeTrainKey) return;
@@ -257,8 +259,29 @@ export default function App() {
         setTrainView(prev => {
             if (!prev) return prev;
             if (prev.trainKey !== activeTrainKey) return prev;
-            if (prev.etaToFocusSeconds === freshEta) return prev;
-            return { ...prev, etaToFocusSeconds: freshEta };
+            const refreshedRoute = getRouteForTrain(matched.line || prev.line, matched.direction || prev.direction);
+            const routeStations = refreshedRoute.length > 0 ? refreshedRoute : prev.routeStations;
+            const normalizedMatchedStation = normalizeStation(matched.station);
+            const refreshedAnchor = routeStations.indexOf(normalizedMatchedStation);
+            const anchorIndex = refreshedAnchor >= 0 ? refreshedAnchor : prev.anchorIndex;
+            const nextState = {
+                ...prev,
+                destination: matched.destination || prev.destination,
+                line: matched.line || prev.line,
+                direction: matched.direction || prev.direction,
+                routeStations,
+                anchorIndex,
+                etaToFocusSeconds: freshEta
+            };
+            if (
+                nextState.destination === prev.destination &&
+                nextState.line === prev.line &&
+                nextState.direction === prev.direction &&
+                nextState.anchorIndex === prev.anchorIndex &&
+                nextState.etaToFocusSeconds === prev.etaToFocusSeconds &&
+                nextState.routeStations === prev.routeStations
+            ) return prev;
+            return nextState;
         });
     }, [activeTrainKey, currentTrains, selectedTrainIdentityKey, selectedTrainIdentityRank]);
 
@@ -361,8 +384,11 @@ export default function App() {
 
     const getStationEta = (viewState, stationIndex) => {
         if (!viewState) return null;
-        const stopsBeforeAnchor = viewState.anchorIndex - stationIndex;
-        return viewState.etaToFocusSeconds - stopsBeforeAnchor * TRAIN_STEP_SECONDS;
+        const currentIndex = getFocusedIndexForView(viewState);
+        if (currentIndex == null) return null;
+        if (stationIndex < currentIndex) return -1;
+        const baseEtaAtCurrent = viewState.etaToFocusSeconds - (viewState.anchorIndex - currentIndex) * TRAIN_STEP_SECONDS;
+        return baseEtaAtCurrent + (stationIndex - currentIndex) * TRAIN_STEP_SECONDS;
     };
 
     const formatTrainEta = (seconds) => {
