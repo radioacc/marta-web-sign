@@ -400,6 +400,7 @@ main {
 
 .dark-mode .timeline-row.focused {
     color: #ffffff;
+    background: rgba(237, 28, 36, 0.18);
 }
 
 .dark-mode .timeline-dot {

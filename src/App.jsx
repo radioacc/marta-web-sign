@@ -73,6 +73,11 @@ const parseWaitingSeconds = (value) => {
     return Math.max(secs, MIN_WAIT_SECONDS);
 };
 
+const getTrainIdentityKey = (t) => {
+    if (!t?.train_id) return null;
+    return `${t.train_id}:${t.line || 'NA'}:${t.direction || 'NA'}:${t.destination || 'NA'}`;
+};
+
 export default function App() {
     const [currentStation, setCurrentStation] = useState(() => {
         return localStorage.getItem('marta_user_station') || "MIDTOWN";
@@ -207,6 +212,8 @@ export default function App() {
     const selectedTrainLine = trainView?.line || null;
     const selectedTrainDirection = trainView?.direction || null;
     const selectedTrainDestination = trainView?.destination || null;
+    const selectedTrainIdentityKey = trainView?.trainIdentityKey || null;
+    const selectedTrainIdentityRank = trainView?.trainIdentityRank ?? 0;
 
     useEffect(() => {
         if (!activeTrainKey) return;
@@ -238,9 +245,15 @@ export default function App() {
     useEffect(() => {
         if (!activeTrainKey) return;
 
+        let identitySeen = 0;
         const matched = currentTrains.find((t, i) => {
             const key = getTrainKey(t, i);
             if (key === activeTrainKey) return true;
+            const identityKey = getTrainIdentityKey(t);
+            if (selectedTrainIdentityKey && identityKey === selectedTrainIdentityKey) {
+                if (identitySeen === selectedTrainIdentityRank) return true;
+                identitySeen += 1;
+            }
             if (selectedTrainId && t.train_id && String(t.train_id) === String(selectedTrainId)) {
                 return t.line === selectedTrainLine && t.direction === selectedTrainDirection && t.destination === selectedTrainDestination;
             }
@@ -258,7 +271,7 @@ export default function App() {
             if (Math.abs(prev.etaToFocusSeconds - freshEta) < 20) return prev;
             return { ...prev, etaToFocusSeconds: freshEta };
         });
-    }, [activeTrainKey, currentTrains, selectedTrainDestination, selectedTrainDirection, selectedTrainId, selectedTrainLine]);
+    }, [activeTrainKey, currentTrains, selectedTrainDestination, selectedTrainDirection, selectedTrainIdentityKey, selectedTrainIdentityRank, selectedTrainId, selectedTrainLine]);
 
     useEffect(() => {
         lastTimelineScrollRef.current = { index: null, at: 0 };
@@ -315,8 +328,8 @@ export default function App() {
         return str.toLowerCase().replace(/(?:^|[\s-])\w/g, match => match.toUpperCase());
     };
 
-    const getTrainKey = (t) => {
-        if (t.train_id) return `id:${t.train_id}:${t.line || 'NA'}:${t.direction || 'NA'}:${t.destination || 'NA'}`;
+    const getTrainKey = (t, i) => {
+        if (t.train_id) return `id:${t.train_id}:${t.line || 'NA'}:${t.direction || 'NA'}:${t.destination || 'NA'}:${i}`;
         return `${t.line || 'NA'}-${t.direction || 'NA'}-${t.destination || 'NA'}-${normalizeStation(t.station) || 'NA'}`;
     };
 
@@ -345,6 +358,10 @@ export default function App() {
             destination: train.destination,
             line: train.line,
             direction: train.direction,
+            trainIdentityKey: getTrainIdentityKey(train),
+            trainIdentityRank: currentTrains
+                .slice(0, rowIndex)
+                .filter(item => getTrainIdentityKey(item) === getTrainIdentityKey(train)).length,
             routeStations,
             anchorIndex: focusIndex,
             focusIndex,
@@ -357,13 +374,14 @@ export default function App() {
 
     const getStationEta = (viewState, stationIndex) => {
         if (!viewState) return null;
-        if (stationIndex < viewState.focusIndex) return null;
+        if (stationIndex < viewState.focusIndex) return 0;
         const stopDiff = stationIndex - viewState.focusIndex;
         return Math.max(0, viewState.etaToFocusSeconds + stopDiff * TRAIN_STEP_SECONDS);
     };
 
     const formatTrainEta = (seconds) => {
         if (seconds == null) return "";
+        if (seconds === 0) return "0 min";
         if (seconds <= ARRIVING_THRESHOLD_SECONDS) return "Arriving";
         return `${Math.ceil(seconds / 60)} min`;
     };
