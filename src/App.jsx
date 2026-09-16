@@ -387,8 +387,8 @@ export default function App() {
         const currentIndex = getFocusedIndexForView(viewState);
         if (currentIndex == null) return null;
         if (stationIndex < currentIndex) return -1;
-        const rawEta = viewState.etaToFocusSeconds + (stationIndex - viewState.anchorIndex) * TRAIN_STEP_SECONDS;
-        return Math.max(0, rawEta);
+        const etaAtCurrent = Math.max(0, viewState.etaToFocusSeconds - (viewState.anchorIndex - currentIndex) * TRAIN_STEP_SECONDS);
+        return etaAtCurrent + (stationIndex - currentIndex) * TRAIN_STEP_SECONDS;
     };
 
     const formatTrainEta = (seconds) => {
