@@ -103,6 +103,14 @@ export default function App() {
         });
     };
 
+    const enterTrainView = () => {
+        setIsSplitScreen(prev => {
+            if (prev) return prev;
+            localStorage.setItem('marta_split_screen', 'true');
+            return true;
+        });
+    };
+
     // --- 2. IRONCLAD FETCH LOGIC (Now writes directly to the Omni-Cache) ---
     const fetchTrains = useCallback(async () => {
         setIsLoading(true);
@@ -243,7 +251,21 @@ export default function App() {
         else { mainTime = mainTime.replace(' min', ''); }
 
         return (
-            <div key={i} className="train-row status-real">
+            <div
+                key={i}
+                className={`train-row status-real${isSplitScreen ? '' : ' tappable'}`}
+                role={isSplitScreen ? undefined : "button"}
+                tabIndex={isSplitScreen ? undefined : 0}
+                onClick={isSplitScreen ? undefined : enterTrainView}
+                onTouchEnd={isSplitScreen ? undefined : (e) => { e.preventDefault(); enterTrainView(); }}
+                onKeyDown={isSplitScreen ? undefined : (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        enterTrainView();
+                    }
+                }}
+                aria-label={isSplitScreen ? undefined : `Open train view for ${t.destination}`}
+            >
                 <div className={`line-bubble ${t.line}`}>{t.direction}</div>
                 <div className="train-info"><div className="destination">{t.destination}</div></div>
                 <div className="minutes-box">
@@ -325,7 +347,17 @@ export default function App() {
                 )}
             </svg>
 
-            <button id="split-toggle" className={isSplitScreen ? 'active' : ''} onClick={toggleSplitScreen} title="Toggle split screen">⊞</button>
+            <button
+                id="split-toggle"
+                className={isSplitScreen ? 'active' : ''}
+                onClick={toggleSplitScreen}
+                onTouchEnd={(e) => { e.preventDefault(); toggleSplitScreen(); }}
+                title="Toggle split screen"
+                type="button"
+                aria-label="Toggle train view"
+            >
+                ⊞
+            </button>
 
             <div id="toast" className={toastMsg ? "show" : ""}>{toastMsg}</div>
 
