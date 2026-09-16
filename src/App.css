@@ -275,10 +275,91 @@ main {
     color: black;
 }
 
+.train-view-overlay {
+    z-index: 180;
+}
+
+.train-view-content {
+    max-width: 520px;
+}
+
+.train-view-body {
+    padding: 18px 20px 20px;
+}
+
+.train-view-main {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.train-view-main-text {
+    min-width: 0;
+}
+
+.train-view-destination {
+    font-size: clamp(1.35rem, 4vw, 2rem);
+    font-weight: 700;
+    line-height: 1.1;
+}
+
+.train-view-meta {
+    margin-top: 6px;
+    font-size: 0.9rem;
+    color: #666;
+}
+
+.train-view-status {
+    margin-top: 16px;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.train-view-status span {
+    opacity: 0.75;
+    margin-right: 6px;
+}
+
+.train-view-upcoming {
+    margin-top: 18px;
+    border-top: 1px solid #eee;
+    padding-top: 14px;
+}
+
+.train-view-upcoming-title {
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: #888;
+}
+
+.train-view-upcoming ul {
+    list-style: none;
+    margin-top: 10px;
+}
+
+.train-view-upcoming li {
+    padding: 6px 0;
+    border-bottom: 1px solid #eee;
+}
+
 .dark-mode .modal-content {
     background-color: #222;
     color: #eee;
     border: 1px solid #444;
+}
+
+.dark-mode .train-view-meta {
+    color: #aaa;
+}
+
+.dark-mode .train-view-upcoming {
+    border-top-color: #444;
+}
+
+.dark-mode .train-view-upcoming li {
+    border-bottom-color: #444;
 }
 
 .modal-header {

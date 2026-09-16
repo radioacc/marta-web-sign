@@ -76,6 +76,7 @@ export default function App() {
     const [error, setError] = useState(false);
     const [showStationModal, setShowStationModal] = useState(false);
     const [showFilterModal, setShowFilterModal] = useState(false);
+    const [selectedTrain, setSelectedTrain] = useState(null);
     const [toastMsg, setToastMsg] = useState("");
     const [locationOverridden, setLocationOverridden] = useState(() => {
         return localStorage.getItem('marta_user_station') !== null;
@@ -103,13 +104,8 @@ export default function App() {
         });
     };
 
-    const enterTrainView = () => {
-        setIsSplitScreen(prev => {
-            if (prev) return prev;
-            localStorage.setItem('marta_split_screen', 'true');
-            return true;
-        });
-    };
+    const openTrainView = (train) => setSelectedTrain(train);
+    const closeTrainView = () => setSelectedTrain(null);
 
     // --- 2. IRONCLAD FETCH LOGIC (Now writes directly to the Omni-Cache) ---
     const fetchTrains = useCallback(async () => {
@@ -223,6 +219,7 @@ export default function App() {
     const handleStationChange = (station) => {
         setCurrentStation(station);
         setActiveFilter("ALL");
+        setSelectedTrain(null);
         setLocationOverridden(true);
         localStorage.setItem('marta_user_station', station);
         setShowStationModal(false);
@@ -242,6 +239,17 @@ export default function App() {
 
     const northboundTrains = currentTrains.filter(t => t.direction === "N");
     const southboundTrains = currentTrains.filter(t => t.direction === "S");
+    const relatedTrains = selectedTrain
+        ? currentTrains
+            .filter(t =>
+                t.line === selectedTrain.line &&
+                t.direction === selectedTrain.direction &&
+                t.destination === selectedTrain.destination
+            )
+            .slice(0, 5)
+        : [];
+
+    const directionLabel = (direction) => direction === 'N' ? 'Northbound' : direction === 'S' ? 'Southbound' : direction;
 
     const renderTrainRow = (t, i) => {
         let mainTime = t.waiting_time;
@@ -253,18 +261,18 @@ export default function App() {
         return (
             <div
                 key={i}
-                className={`train-row status-real${isSplitScreen ? '' : ' tappable'}`}
-                role={isSplitScreen ? undefined : "button"}
-                tabIndex={isSplitScreen ? undefined : 0}
-                onClick={isSplitScreen ? undefined : enterTrainView}
-                onTouchEnd={isSplitScreen ? undefined : (e) => { e.preventDefault(); enterTrainView(); }}
-                onKeyDown={isSplitScreen ? undefined : (e) => {
+                className="train-row status-real tappable"
+                role="button"
+                tabIndex={0}
+                onClick={() => openTrainView(t)}
+                onTouchEnd={(e) => { e.preventDefault(); openTrainView(t); }}
+                onKeyDown={(e) => {
                     if (e.key === 'Enter' || e.key === ' ') {
                         e.preventDefault();
-                        enterTrainView();
+                        openTrainView(t);
                     }
                 }}
-                aria-label={isSplitScreen ? undefined : `Open train view for ${t.destination}`}
+                aria-label={`Open train view for ${t.destination}`}
             >
                 <div className={`line-bubble ${t.line}`}>{t.direction}</div>
                 <div className="train-info"><div className="destination">{t.destination}</div></div>
@@ -360,6 +368,41 @@ export default function App() {
             </button>
 
             <div id="toast" className={toastMsg ? "show" : ""}>{toastMsg}</div>
+
+            {selectedTrain && (
+                <div className="modal-overlay train-view-overlay" onClick={(e) => { if (e.target.className.includes('modal-overlay')) closeTrainView(); }}>
+                    <div className="modal-content train-view-content">
+                        <div className="modal-header">
+                            <span className="modal-title">Train View</span>
+                            <button className="close-btn" onClick={closeTrainView} type="button" aria-label="Close train view">&times;</button>
+                        </div>
+                        <div className="train-view-body">
+                            <div className="train-view-main">
+                                <div className={`line-bubble ${selectedTrain.line}`}>{selectedTrain.direction}</div>
+                                <div className="train-view-main-text">
+                                    <div className="train-view-destination">{selectedTrain.destination}</div>
+                                    <div className="train-view-meta">
+                                        {displayStation} • {directionLabel(selectedTrain.direction)}
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="train-view-status">
+                                <span>Arrives:</span> {selectedTrain.waiting_time}
+                            </div>
+                            {relatedTrains.length > 1 && (
+                                <div className="train-view-upcoming">
+                                    <div className="train-view-upcoming-title">Upcoming Trains</div>
+                                    <ul>
+                                        {relatedTrains.map((t, i) => (
+                                            <li key={`${t.waiting_seconds}-${i}`}>{t.waiting_time}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {showStationModal && (
                 <div className="modal-overlay" onClick={(e) => { if (e.target.className.includes('modal-overlay')) setShowStationModal(false); }}>
