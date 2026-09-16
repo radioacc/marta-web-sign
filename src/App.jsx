@@ -368,8 +368,8 @@ export default function App() {
 
     const getStationEta = (viewState, stationIndex) => {
         if (!viewState) return null;
-        const stopDiff = stationIndex - viewState.anchorIndex;
-        return viewState.etaToFocusSeconds + stopDiff * TRAIN_STEP_SECONDS;
+        const stopsBeforeAnchor = viewState.anchorIndex - stationIndex;
+        return viewState.etaToFocusSeconds - stopsBeforeAnchor * TRAIN_STEP_SECONDS;
     };
 
     const formatTrainEta = (seconds) => {
