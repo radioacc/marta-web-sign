@@ -65,7 +65,7 @@ export default function App() {
         STATION_LIST.forEach(s => {
             const saved = localStorage.getItem(`marta_backup_${s}`);
             if (saved) {
-                try { initialCache[s] = JSON.parse(saved); } catch { }
+                try { initialCache[s] = JSON.parse(saved); } catch { localStorage.removeItem(`marta_backup_${s}`); }
             }
         });
         return initialCache;
