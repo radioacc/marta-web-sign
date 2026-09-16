@@ -75,7 +75,7 @@ const parseWaitingSeconds = (value) => {
 
 const getTrainIdentityKey = (t) => {
     if (!t?.train_id) return null;
-    return `${t.train_id}:${t.line || 'NA'}:${t.direction || 'NA'}:${t.destination || 'NA'}`;
+    return `${t.train_id}:${t.line || 'NA'}:${t.direction || 'NA'}`;
 };
 
 export default function App() {
@@ -325,7 +325,7 @@ export default function App() {
     };
 
     const getTrainKey = (t, i = -1) => {
-        if (t.train_id) return `id:${t.train_id}:${t.line || 'NA'}:${t.direction || 'NA'}:${t.destination || 'NA'}`;
+        if (t.train_id) return `id:${t.train_id}:${t.line || 'NA'}:${t.direction || 'NA'}`;
         return `${t.line || 'NA'}-${t.direction || 'NA'}-${t.destination || 'NA'}-${normalizeStation(t.station) || 'NA'}-${i}`;
     };
 
