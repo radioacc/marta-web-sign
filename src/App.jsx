@@ -207,10 +207,6 @@ export default function App() {
     }, [fetchTrains]);
 
     const activeTrainKey = trainView?.trainKey || null;
-    const selectedTrainId = trainView?.trainId || null;
-    const selectedTrainLine = trainView?.line || null;
-    const selectedTrainDirection = trainView?.direction || null;
-    const selectedTrainDestination = trainView?.destination || null;
     const selectedTrainIdentityKey = trainView?.trainIdentityKey || null;
     const selectedTrainIdentityRank = trainView?.trainIdentityRank ?? 0;
     const focusedTrainIndex = useMemo(() => {
@@ -250,9 +246,6 @@ export default function App() {
                 if (identitySeen === selectedTrainIdentityRank) return true;
                 identitySeen += 1;
             }
-            if (selectedTrainId && t.train_id && String(t.train_id) === String(selectedTrainId)) {
-                return t.line === selectedTrainLine && t.direction === selectedTrainDirection && t.destination === selectedTrainDestination;
-            }
             return false;
         });
         if (!matched) {
@@ -267,7 +260,7 @@ export default function App() {
             if (prev.etaToFocusSeconds === freshEta) return prev;
             return { ...prev, etaToFocusSeconds: freshEta };
         });
-    }, [activeTrainKey, currentTrains, selectedTrainDestination, selectedTrainDirection, selectedTrainIdentityKey, selectedTrainIdentityRank, selectedTrainId, selectedTrainLine]);
+    }, [activeTrainKey, currentTrains, selectedTrainIdentityKey, selectedTrainIdentityRank]);
 
     useEffect(() => {
         lastTimelineScrollRef.current = { index: null, at: 0 };
