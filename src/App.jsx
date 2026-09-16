@@ -217,10 +217,12 @@ export default function App() {
 
     useEffect(() => {
         if (!activeTrainKey) return;
+        const effectTrainKey = activeTrainKey;
 
         const ticker = setInterval(() => {
             setTrainView(prev => {
                 if (!prev) return prev;
+                if (prev.trainKey !== effectTrainKey) return prev;
                 let nextEta = prev.etaToFocusSeconds - 1;
                 let nextFocus = prev.focusIndex;
                 const step = prev.travelStep > 0 ? prev.travelStep : 1;
@@ -381,7 +383,6 @@ export default function App() {
 
     const formatTrainEta = (seconds) => {
         if (seconds == null) return "";
-        if (seconds === 0) return "0 min";
         if (seconds <= ARRIVING_THRESHOLD_SECONDS) return "Arriving";
         return `${Math.ceil(seconds / 60)} min`;
     };
