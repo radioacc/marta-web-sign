@@ -328,8 +328,8 @@ export default function App() {
         return str.toLowerCase().replace(/(?:^|[\s-])\w/g, match => match.toUpperCase());
     };
 
-    const getTrainKey = (t, i) => {
-        if (t.train_id) return `id:${t.train_id}:${t.line || 'NA'}:${t.direction || 'NA'}:${t.destination || 'NA'}:${i}`;
+    const getTrainKey = (t) => {
+        if (t.train_id) return `id:${t.train_id}:${t.line || 'NA'}:${t.direction || 'NA'}:${t.destination || 'NA'}`;
         return `${t.line || 'NA'}-${t.direction || 'NA'}-${t.destination || 'NA'}-${normalizeStation(t.station) || 'NA'}`;
     };
 
@@ -374,7 +374,7 @@ export default function App() {
 
     const getStationEta = (viewState, stationIndex) => {
         if (!viewState) return null;
-        if (stationIndex < viewState.focusIndex) return 0;
+        if (stationIndex < viewState.focusIndex) return null;
         const stopDiff = stationIndex - viewState.focusIndex;
         return Math.max(0, viewState.etaToFocusSeconds + stopDiff * TRAIN_STEP_SECONDS);
     };
@@ -488,7 +488,7 @@ export default function App() {
                             >
                                 <div className="timeline-dot" />
                                 <div className="timeline-station">{titleCase(station)}</div>
-                                <div className="timeline-eta">{eta == null ? "" : formatTrainEta(eta)}</div>
+                                <div className="timeline-eta">{isPassed ? "Passed" : eta == null ? "" : formatTrainEta(eta)}</div>
                             </div>
                         );
                     })}

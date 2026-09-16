@@ -199,6 +199,9 @@ main {
     padding-bottom: 15px;
     height: 80px;
     cursor: pointer;
+}
+
+button.train-row {
     width: 100%;
     border: none;
     background: transparent;
