@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import './App.css';
 
 const STATION_LIST = [
@@ -54,6 +54,38 @@ const STATION_COORDS = {
     "WEST LAKE": { lat: 33.7531, lon: -84.4461 }
 };
 
+const MIN_WAIT_SECONDS = 15;
+const ARRIVING_THRESHOLD_SECONDS = 30;
+const TRAIN_STEP_SECONDS = 120;
+
+const TRAIN_ROUTES = {
+    RED: ["NORTH SPRINGS", "SANDY SPRINGS", "DUNWOODY", "MEDICAL CENTER", "BUCKHEAD", "LINDBERGH", "ARTS CENTER", "MIDTOWN", "NORTH AVENUE", "CIVIC CENTER", "PEACHTREE CENTER", "FIVE POINTS", "GARNETT", "WEST END", "OAKLAND CITY", "LAKEWOOD", "EAST POINT", "COLLEGE PARK", "AIRPORT"],
+    GOLD: ["DORAVILLE", "CHAMBLEE", "BROOKHAVEN", "LENOX", "LINDBERGH", "ARTS CENTER", "MIDTOWN", "NORTH AVENUE", "CIVIC CENTER", "PEACHTREE CENTER", "FIVE POINTS", "GARNETT", "WEST END", "OAKLAND CITY", "LAKEWOOD", "EAST POINT", "COLLEGE PARK", "AIRPORT"],
+    BLUE: ["HAMILTON E HOLMES", "WEST LAKE", "ASHBY", "VINE CITY", "OMNI", "FIVE POINTS", "GEORGIA STATE", "KING MEMORIAL", "INMAN PARK", "EDGEWOOD CANDLER PARK", "EAST LAKE", "DECATUR", "AVONDALE", "KENSINGTON", "INDIAN CREEK"],
+    GREEN: ["BANKHEAD", "ASHBY", "VINE CITY", "OMNI", "FIVE POINTS", "GEORGIA STATE", "KING MEMORIAL", "INMAN PARK", "EDGEWOOD CANDLER PARK"]
+};
+
+const normalizeStation = (station) => String(station || "").toUpperCase().replace(/ STATION/i, "").trim();
+
+const parseWaitingSeconds = (value) => {
+    const secs = parseInt(value, 10);
+    if (Number.isNaN(secs)) return ARRIVING_THRESHOLD_SECONDS;
+    return Math.max(secs, MIN_WAIT_SECONDS);
+};
+
+const getTrainIdentityKey = (t) => {
+    if (!t?.train_id) return null;
+    return `${t.train_id}:${t.line || 'NA'}:${t.direction || 'NA'}`;
+};
+
+const getFocusedIndexForView = (viewState) => {
+    if (!viewState) return null;
+    const step = TRAIN_STEP_SECONDS > 0 ? TRAIN_STEP_SECONDS : 1;
+    const stopsAway = Math.max(0, Math.floor(viewState.etaToFocusSeconds / step));
+    const index = viewState.anchorIndex - stopsAway;
+    return Math.max(0, Math.min(viewState.routeStations.length - 1, index));
+};
+
 export default function App() {
     const [currentStation, setCurrentStation] = useState(() => {
         return localStorage.getItem('marta_user_station') || "MIDTOWN";
@@ -65,7 +97,11 @@ export default function App() {
         STATION_LIST.forEach(s => {
             const saved = localStorage.getItem(`marta_backup_${s}`);
             if (saved) {
-                try { initialCache[s] = JSON.parse(saved); } catch (e) { }
+                try {
+                    initialCache[s] = JSON.parse(saved);
+                } catch {
+                    localStorage.removeItem(`marta_backup_${s}`);
+                }
             }
         });
         return initialCache;
@@ -88,6 +124,10 @@ export default function App() {
     const [isSplitScreen, setIsSplitScreen] = useState(() => {
         return localStorage.getItem('marta_split_screen') === 'true';
     });
+    const [trainView, setTrainView] = useState(null);
+    const stationItemRefs = useRef({});
+    const lastTimelineScrollRef = useRef({ index: null, at: 0 });
+    const currentTrains = useMemo(() => trainCache[currentStation] || [], [trainCache, currentStation]);
 
     useEffect(() => {
         if (isDarkMode) document.body.classList.add('dark-mode');
@@ -174,6 +214,93 @@ export default function App() {
         return () => clearInterval(interval);
     }, [fetchTrains]);
 
+    const activeTrainKey = trainView?.trainKey || null;
+    const selectedTrainIdentityKey = trainView?.trainIdentityKey || null;
+    const selectedTrainIdentityRank = trainView?.trainIdentityRank ?? 0;
+    const focusedTrainIndex = useMemo(() => getFocusedIndexForView(trainView), [trainView]);
+
+    useEffect(() => {
+        if (!activeTrainKey) return;
+        const effectTrainKey = activeTrainKey;
+
+        const ticker = setInterval(() => {
+            setTrainView(prev => {
+                if (!prev) return prev;
+                if (prev.trainKey !== effectTrainKey) return prev;
+                const nextEta = Math.max(0, prev.etaToFocusSeconds - 1);
+                if (nextEta === prev.etaToFocusSeconds) return prev;
+                return { ...prev, etaToFocusSeconds: nextEta };
+            });
+        }, 1000);
+
+        return () => clearInterval(ticker);
+    }, [activeTrainKey]);
+
+    useEffect(() => {
+        if (!activeTrainKey) return;
+
+        let identitySeen = 0;
+        const matched = currentTrains.find((t, i) => {
+            const key = getTrainKey(t, i);
+            if (key === activeTrainKey) return true;
+            const identityKey = getTrainIdentityKey(t);
+            if (selectedTrainIdentityKey && identityKey === selectedTrainIdentityKey) {
+                if (identitySeen === selectedTrainIdentityRank) return true;
+                identitySeen += 1;
+            }
+            return false;
+        });
+        if (!matched) {
+            setTrainView(prev => (prev?.trainKey === activeTrainKey ? null : prev));
+            return;
+        }
+
+        const freshEta = parseWaitingSeconds(matched.waiting_seconds);
+        setTrainView(prev => {
+            if (!prev) return prev;
+            if (prev.trainKey !== activeTrainKey) return prev;
+            const refreshedRoute = getRouteForTrain(matched.line || prev.line, matched.direction || prev.direction);
+            const routeStations = refreshedRoute.length > 0 ? refreshedRoute : prev.routeStations;
+            const normalizedMatchedStation = normalizeStation(matched.station);
+            const refreshedAnchor = routeStations.indexOf(normalizedMatchedStation);
+            const anchorIndex = refreshedAnchor >= 0 ? refreshedAnchor : prev.anchorIndex;
+            const nextState = {
+                ...prev,
+                destination: matched.destination || prev.destination,
+                line: matched.line || prev.line,
+                direction: matched.direction || prev.direction,
+                routeStations,
+                anchorIndex,
+                etaToFocusSeconds: freshEta
+            };
+            if (
+                nextState.destination === prev.destination &&
+                nextState.line === prev.line &&
+                nextState.direction === prev.direction &&
+                nextState.anchorIndex === prev.anchorIndex &&
+                nextState.etaToFocusSeconds === prev.etaToFocusSeconds &&
+                nextState.routeStations === prev.routeStations
+            ) return prev;
+            return nextState;
+        });
+    }, [activeTrainKey, currentTrains, selectedTrainIdentityKey, selectedTrainIdentityRank]);
+
+    useEffect(() => {
+        lastTimelineScrollRef.current = { index: null, at: 0 };
+    }, [activeTrainKey]);
+
+    useEffect(() => {
+        if (focusedTrainIndex == null) return;
+        const prevIndex = lastTimelineScrollRef.current.index;
+        const elapsedSinceLast = Date.now() - lastTimelineScrollRef.current.at;
+        const behavior = prevIndex == null || elapsedSinceLast < 1000 ? 'auto' : 'smooth';
+        const focusedEl = stationItemRefs.current[focusedTrainIndex];
+        if (focusedEl && focusedEl.scrollIntoView) {
+            focusedEl.scrollIntoView({ behavior, block: 'center' });
+        }
+        lastTimelineScrollRef.current = { index: focusedTrainIndex, at: Date.now() };
+    }, [focusedTrainIndex]);
+
     // Geolocation
     useEffect(() => {
         if (!navigator.geolocation || locationOverridden) return;
@@ -194,10 +321,12 @@ export default function App() {
                 const d = getDist(position.coords.latitude, position.coords.longitude, coords.lat, coords.lon);
                 if (d < minDist) { minDist = d; nearest = station; }
             }
-            if (nearest && nearest !== currentStation) {
+            if (!nearest) return;
+            setCurrentStation(prev => {
+                if (prev === nearest) return prev;
                 showToast(`📍 Found nearest: ${titleCase(nearest)}`);
-                setCurrentStation(nearest);
-            }
+                return nearest;
+            });
         });
     }, [locationOverridden]);
 
@@ -211,10 +340,68 @@ export default function App() {
         return str.toLowerCase().replace(/(?:^|[\s-])\w/g, match => match.toUpperCase());
     };
 
+    const getTrainKey = (t, i = -1) => {
+        if (t.train_id) return `id:${t.train_id}:${t.line || 'NA'}:${t.direction || 'NA'}`;
+        return `${t.line || 'NA'}-${t.direction || 'NA'}-${t.destination || 'NA'}-${normalizeStation(t.station) || 'NA'}-${i}`;
+    };
+
+    const getRouteForTrain = (line, direction) => {
+        const route = TRAIN_ROUTES[line] || [];
+        if (route.length === 0) return [];
+        return direction === "S" || direction === "W" ? route : [...route].reverse();
+    };
+
+    const openTrainView = (train, rowIndex) => {
+        const routeStations = getRouteForTrain(train.line, train.direction);
+        if (routeStations.length === 0) {
+            showToast("Route unavailable for this train.");
+            return;
+        }
+
+        const stationFromTrain = normalizeStation(train.station);
+        const fallbackStation = normalizeStation(currentStation);
+        let focusIndex = routeStations.indexOf(stationFromTrain);
+        if (focusIndex < 0) focusIndex = routeStations.indexOf(fallbackStation);
+        if (focusIndex < 0) focusIndex = 0;
+
+        setTrainView({
+            trainKey: getTrainKey(train, rowIndex),
+            trainId: train.train_id || "",
+            destination: train.destination,
+            line: train.line,
+            direction: train.direction,
+            trainIdentityKey: getTrainIdentityKey(train),
+            trainIdentityRank: currentTrains
+                .slice(0, rowIndex)
+                .filter(item => getTrainIdentityKey(item) === getTrainIdentityKey(train)).length,
+            routeStations,
+            anchorIndex: focusIndex,
+            etaToFocusSeconds: parseWaitingSeconds(train.waiting_seconds)
+        });
+    };
+
+    const closeTrainView = () => setTrainView(null);
+
+    const getStationEta = (viewState, stationIndex) => {
+        if (!viewState) return null;
+        const currentIndex = getFocusedIndexForView(viewState);
+        if (currentIndex == null) return null;
+        if (stationIndex < currentIndex) return -1;
+        const etaAtCurrent = Math.max(0, viewState.etaToFocusSeconds - (viewState.anchorIndex - currentIndex) * TRAIN_STEP_SECONDS);
+        return etaAtCurrent + (stationIndex - currentIndex) * TRAIN_STEP_SECONDS;
+    };
+
+    const formatTrainEta = (seconds) => {
+        if (seconds == null) return "";
+        if (seconds <= ARRIVING_THRESHOLD_SECONDS) return "Arriving";
+        return `${Math.ceil(seconds / 60)} min`;
+    };
+
     // --- 4. THE CLEAN SWAP ---
     const handleStationChange = (station) => {
         setCurrentStation(station);
         setActiveFilter("ALL");
+        setTrainView(null);
         setLocationOverridden(true);
         localStorage.setItem('marta_user_station', station);
         setShowStationModal(false);
@@ -224,13 +411,14 @@ export default function App() {
         setIsLoading(true);
     };
 
-    // Dynamically grab the correct data block for whichever station is selected
-    const currentTrains = trainCache[currentStation] || [];
     const visibleTrains = currentTrains.filter(t => activeFilter === "ALL" || t.destination === activeFilter);
     const uniqueDestinations = Array.from(new Set(currentTrains.map(t => t.destination))).sort();
     const displayStation = currentStation === "OMNI"
         ? "SEC District"
         : titleCase(currentStation.replace(/ STATION/i, ''));
+    const trainHeaderTitle = trainView ? titleCase(trainView.destination || displayStation) : displayStation;
+    const trainHeaderEta = trainView ? formatTrainEta(trainView.etaToFocusSeconds) : null;
+    const trainIdLabel = trainView?.trainId ? `Train ${trainView.trainId}` : "Train";
 
     const northboundTrains = currentTrains.filter(t => t.direction === "N");
     const southboundTrains = currentTrains.filter(t => t.direction === "S");
@@ -243,14 +431,20 @@ export default function App() {
         else { mainTime = mainTime.replace(' min', ''); }
 
         return (
-            <div key={i} className="train-row status-real">
+            <button
+                key={getTrainKey(t, i)}
+                type="button"
+                className="train-row status-real"
+                onClick={() => openTrainView(t, i)}
+                aria-label={`Open Train view for ${t.destination} ${t.direction || ''}`.trim()}
+            >
                 <div className={`line-bubble ${t.line}`}>{t.direction}</div>
                 <div className="train-info"><div className="destination">{t.destination}</div></div>
                 <div className="minutes-box">
                     <div className="minutes-main">{mainTime}</div>
                     <div className="minutes-sub">{subLabel}</div>
                 </div>
-            </div>
+            </button>
         );
     };
 
@@ -260,20 +454,58 @@ export default function App() {
 
     return (
         <div className={`app-container${isSplitScreen ? ' split-screen-active' : ''}`}>
-            <header>
-                <div className="brand">TRAINS</div>
-                <div className="station-display">
-                    <span>ARRIVING AT</span>
-                    {displayStation}
-                </div>
-                <div className="controls">
-                    {isLoading && <div className="spinner"></div>}
-                    <button className="nav-btn" onClick={() => setShowFilterModal(true)}>FILTER</button>
-                    <button className="nav-btn" onClick={() => setShowStationModal(true)}>STATION</button>
-                </div>
+            <header className={trainView ? "train-view-header" : ""}>
+                {trainView ? (
+                    <>
+                        <button className="back-btn" onClick={closeTrainView} aria-label="Close Train view">←</button>
+                        <div className="train-header-main">
+                            <div className="train-destination">{trainHeaderTitle}</div>
+                            <div className="train-meta">
+                                <div className={`line-bubble compact ${trainView.line}`}>{trainView.direction}</div>
+                                <span>{trainHeaderEta}</span>
+                                <small>{trainIdLabel}</small>
+                            </div>
+                        </div>
+                    </>
+                ) : (
+                    <>
+                        <div className="brand">TRAINS</div>
+                        <div className="station-display">
+                            <span>ARRIVING AT</span>
+                            {displayStation}
+                        </div>
+                        <div className="controls">
+                            {isLoading && <div className="spinner"></div>}
+                            <button className="nav-btn" onClick={() => setShowFilterModal(true)}>FILTER</button>
+                            <button className="nav-btn" onClick={() => setShowStationModal(true)}>STATION</button>
+                        </div>
+                    </>
+                )}
             </header>
 
-            {isSplitScreen ? (
+            {trainView ? (
+                <main className="train-timeline" tabIndex={0} aria-label="Train route timeline">
+                    {trainView.routeStations.map((station, index) => {
+                        const eta = getStationEta(trainView, index);
+                        const isPassed = focusedTrainIndex != null ? index < focusedTrainIndex : false;
+                        const isFocused = focusedTrainIndex != null ? index === focusedTrainIndex : false;
+                        const rowClass = `timeline-row${isPassed ? ' passed' : ''}${isFocused ? ' focused' : ''}`;
+                        return (
+                            <div
+                                key={`${station}-${index}`}
+                                className={rowClass}
+                                ref={(node) => { stationItemRefs.current[index] = node; }}
+                                aria-current={isFocused ? "step" : undefined}
+                                aria-label={`${titleCase(station)}${isFocused ? " current stop" : ""}${isPassed ? ", passed" : eta == null ? "" : `, ${formatTrainEta(eta)}`}`}
+                            >
+                                <div className="timeline-dot" />
+                                <div className="timeline-station">{titleCase(station)}</div>
+                                <div className="timeline-eta">{isPassed ? "Passed" : eta == null ? "" : formatTrainEta(eta)}</div>
+                            </div>
+                        );
+                    })}
+                </main>
+            ) : isSplitScreen ? (
                 <div className="split-container" style={{ opacity: isLoading && currentTrains.length > 0 ? 0.6 : 1, transition: 'opacity 0.3s' }}>
                     <div className="split-panel">
                         <div className="split-panel-header">NORTHBOUND</div>
@@ -325,11 +557,23 @@ export default function App() {
                 )}
             </svg>
 
-            <button id="split-toggle" className={isSplitScreen ? 'active' : ''} onClick={toggleSplitScreen} title="Toggle split screen">⊞</button>
+            {!trainView && (
+                <button
+                    id="split-toggle"
+                    className={isSplitScreen ? 'active' : ''}
+                    onClick={toggleSplitScreen}
+                    onTouchEnd={(e) => { e.preventDefault(); toggleSplitScreen(); }}
+                    title="Toggle split screen"
+                    type="button"
+                    aria-label="Toggle split screen"
+                >
+                    ⊞
+                </button>
+            )}
 
             <div id="toast" className={toastMsg ? "show" : ""}>{toastMsg}</div>
 
-            {showStationModal && (
+            {!trainView && showStationModal && (
                 <div className="modal-overlay" onClick={(e) => { if (e.target.className.includes('modal-overlay')) setShowStationModal(false); }}>
                     <div className="modal-content">
                         <div className="modal-header">
@@ -345,7 +589,7 @@ export default function App() {
                 </div>
             )}
 
-            {showFilterModal && (
+            {!trainView && showFilterModal && (
                 <div className="modal-overlay" onClick={(e) => { if (e.target.className.includes('modal-overlay')) setShowFilterModal(false); }}>
                     <div className="modal-content">
                         <div className="modal-header">
