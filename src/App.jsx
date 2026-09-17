@@ -239,12 +239,25 @@ export default function App() {
 
     const northboundTrains = currentTrains.filter(t => t.direction === "N");
     const southboundTrains = currentTrains.filter(t => t.direction === "S");
-    const relatedTrains = selectedTrain
+    const activeSelectedTrain = selectedTrain
+        ? currentTrains.find(t =>
+            t.line === selectedTrain.line &&
+            t.direction === selectedTrain.direction &&
+            t.destination === selectedTrain.destination &&
+            t.waiting_seconds === selectedTrain.waiting_seconds
+        ) || currentTrains.find(t =>
+            t.line === selectedTrain.line &&
+            t.direction === selectedTrain.direction &&
+            t.destination === selectedTrain.destination
+        ) || selectedTrain
+        : null;
+
+    const relatedTrains = activeSelectedTrain
         ? currentTrains
             .filter(t =>
-                t.line === selectedTrain.line &&
-                t.direction === selectedTrain.direction &&
-                t.destination === selectedTrain.destination
+                t.line === activeSelectedTrain.line &&
+                t.direction === activeSelectedTrain.direction &&
+                t.destination === activeSelectedTrain.destination
             )
             .slice(0, 5)
         : [];
@@ -378,16 +391,16 @@ export default function App() {
                         </div>
                         <div className="train-view-body">
                             <div className="train-view-main">
-                                <div className={`line-bubble ${selectedTrain.line}`}>{selectedTrain.direction}</div>
+                                <div className={`line-bubble ${activeSelectedTrain.line}`}>{activeSelectedTrain.direction}</div>
                                 <div className="train-view-main-text">
-                                    <div className="train-view-destination">{selectedTrain.destination}</div>
+                                    <div className="train-view-destination">{activeSelectedTrain.destination}</div>
                                     <div className="train-view-meta">
-                                        {displayStation} • {directionLabel(selectedTrain.direction)}
+                                        {displayStation} • {directionLabel(activeSelectedTrain.direction)}
                                     </div>
                                 </div>
                             </div>
                             <div className="train-view-status">
-                                <span>Arrives:</span> {selectedTrain.waiting_time}
+                                <span>Arrives:</span> {activeSelectedTrain.waiting_time}
                             </div>
                             {relatedTrains.length > 1 && (
                                 <div className="train-view-upcoming">

@@ -276,7 +276,7 @@ main {
 }
 
 .train-view-overlay {
-    z-index: 180;
+    z-index: 400;
 }
 
 .train-view-content {
